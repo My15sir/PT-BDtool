@@ -217,7 +217,7 @@ https://www.docker.com/
 
 目前不接受 Issue、Feature Request 或 Pull Request。
 
-如果在使用过程中遇到问题，请直接询问 GPT或其他AI 进行排查或解决。
+如果在使用过程中遇到问题，请直接询问 GPT或其他AI 进行排查、解决。
 
 感谢理解。
 
