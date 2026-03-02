@@ -1,0 +1,16 @@
+# 输出文件
+out/
+output/
+reports/
+
+# 截图
+*.png
+*.jpg
+
+# 报告
+*.txt
+*.bd.txt
+
+# 临时文件
+*.log
+.tmp/
