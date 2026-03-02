@@ -213,18 +213,13 @@ https://www.docker.com/
 
 # 贡献
 
-欢迎提交：
+本项目为 **纯 AI 生成项目（AI Generated Project）**。
 
-- Issue
-- Feature Request
-- Pull Request
+目前不接受 Issue、Feature Request 或 Pull Request。
 
-贡献流程：
+如果在使用过程中遇到问题，请直接询问 GPT或其他AI 进行排查或解决。
 
-1. Fork 仓库
-2. 创建分支
-3. 提交修改
-4. 提交 PR
+感谢理解。
 
 ---
 
