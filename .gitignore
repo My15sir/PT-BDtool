@@ -1,16 +1,16 @@
-# 输出文件
+# 产物目录（脚本生成）
 out/
 output/
 reports/
 
-# 截图
-*.png
-*.jpg
+# 截图（按你的命名）
+截图_*.png
+截图_*.jpg
 
 # 报告
 *.txt
 *.bd.txt
 
-# 临时文件
+# 临时
 *.log
 .tmp/
