@@ -30,7 +30,13 @@
 
 ## 安装 Install
 
-克隆仓库：
+##### 一键安装（推荐）
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
+```
+
+##### 克隆仓库：
 
 ``` bash
 git clone https://github.com/My15sir/PT-BDtool.git
