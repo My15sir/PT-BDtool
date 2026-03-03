@@ -14,3 +14,4 @@ reports/
 # 临时
 *.log
 .tmp/
+REFACTOR_SPEC.md
