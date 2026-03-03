@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BDTOOL_ROOT="$SCRIPT_DIR"
+if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
+  # shellcheck source=lib/ui.sh
+  source "$SCRIPT_DIR/lib/ui.sh"
+else
+  log_info() { printf "[INFO] %s\n" "$*" >&2; }
+  log_warn() { printf "[WARN] %s\n" "$*" >&2; }
+  log_err() { printf "[ERROR] %s\n" "$*" >&2; }
+  log_success() { printf "[SUCCESS] %s\n" "$*" >&2; }
+  hr() { printf "================================================================\n" >&2; }
+  section() { hr; printf "%s\n" "$*" >&2; hr; }
+  prompt_with_default() { local p="${1:-请输入值}" d="${2:-}" v=""; read -r -p "  ▶ ${p} [默认 ${d}]: " v < /dev/tty || true; printf "%s" "${v:-$d}"; }
+  validate_nonempty() { [[ -n "${1:-}" ]]; }
+  validate_int_range() { local v="${1:-}" min="${2:-1}" max="${3:-65535}"; [[ "$v" =~ ^[0-9]+$ ]] && (( v >= min && v <= max )); }
+  ensure_log_dir() { local root="${1:-$SCRIPT_DIR}"; BDTOOL_ROOT="$root"; BDTOOL_LOG_DIR="$root/bdtool-output/logs"; BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"; mkdir -p "$BDTOOL_LOG_DIR"; touch "$BDTOOL_RUN_LOG"; }
+  setup_log_redirection() { ensure_log_dir "${1:-$SCRIPT_DIR}"; [[ "${BDTOOL_LOG_REDIRECTED:-0}" == "1" ]] && return 0; BDTOOL_LOG_REDIRECTED=1; exec > >(tee -a "$BDTOOL_RUN_LOG") 2> >(tee -a "$BDTOOL_RUN_LOG" >&2); }
+  execute_with_spinner() { local m="$1"; shift; ensure_log_dir "${BDTOOL_ROOT:-$SCRIPT_DIR}"; "$@" >> "$BDTOOL_RUN_LOG" 2>&1; local r=$?; [[ "$r" -eq 0 ]] && log_success "$m 完成" || log_err "$m 失败 (请查看 $BDTOOL_RUN_LOG)"; return "$r"; }
+  die() { local m="${1:-执行失败}" c="${2:-1}"; ensure_log_dir "${BDTOOL_ROOT:-$SCRIPT_DIR}"; log_err "$m"; log_err "详情日志：$BDTOOL_RUN_LOG"; exit "$c"; }
+fi
+ensure_log_dir "$SCRIPT_DIR"
+setup_log_redirection "$SCRIPT_DIR"
+
 # PT-BDtool installer
 # 用法：
 #   bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh) [-k] [--lang zh|en]
@@ -14,7 +37,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -k) DO_K="1"; shift ;;
     --lang)
-      [[ $# -ge 2 ]] || { echo "[bdtool-install][ERROR] --lang requires a value: zh|en" >&2; exit 1; }
+      [[ $# -ge 2 ]] || die "--lang requires a value: zh|en"
       ARG_LANG="$2"
       shift 2
       ;;
@@ -52,15 +75,18 @@ prompt_lang() {
   local def ans norm
   def="$(detect_default_lang)"
   if [[ "$def" == "zh" ]]; then
-    echo "[bdtool-install] 请选择语言 / Select language: [1] 中文 [2] English (默认: 1)"
+    section "请选择语言 / Select language"
+    ans="$(prompt_with_default "输入 1(中文) 或 2(English)" "1")"
   else
-    echo "[bdtool-install] Select language / 请选择语言: [1] 中文 [2] English (default: 2)"
+    section "Select language / 请选择语言"
+    ans="$(prompt_with_default "Input 1(中文) or 2(English)" "2")"
   fi
-  read -r ans || true
+
   if [[ -z "${ans:-}" ]]; then
     echo "$def"
     return 0
   fi
+
   case "$ans" in
     1) echo "zh" ;;
     2) echo "en" ;;
@@ -75,20 +101,20 @@ detect_lang() {
   local norm
   if [[ -n "$ARG_LANG" ]]; then
     norm="$(normalize_lang "$ARG_LANG" 2>/dev/null || true)"
-    [[ -n "$norm" ]] || { echo "[bdtool-install][ERROR] invalid --lang: $ARG_LANG (use zh|en)" >&2; exit 1; }
+    [[ -n "$norm" ]] || die "invalid --lang: $ARG_LANG (use zh|en)"
     echo "$norm"
     return 0
   fi
 
   if [[ -n "${BDTOOL_LANG:-}" ]]; then
     norm="$(normalize_lang "$BDTOOL_LANG" 2>/dev/null || true)"
-    [[ -n "$norm" ]] || { echo "[bdtool-install][ERROR] invalid BDTOOL_LANG: $BDTOOL_LANG (use zh|en)" >&2; exit 1; }
+    [[ -n "$norm" ]] || die "invalid BDTOOL_LANG: $BDTOOL_LANG (use zh|en)"
     echo "$norm"
     return 0
   fi
 
   if [[ -t 0 ]]; then
-    echo "[bdtool-install] Waiting for language selection... / 正在等待选择语言..."
+    log_info "Waiting for language selection... / 正在等待选择语言..."
     prompt_lang
   else
     detect_default_lang
@@ -120,14 +146,12 @@ msg() {
 
   if [[ "$#" -gt 0 ]]; then
     # shellcheck disable=SC2059
-    printf "[bdtool-install] $text\n" "$@"
+    log_info "$(printf "$text" "$@")"
   else
-    printf "[bdtool-install] %s\n" "$text"
+    log_info "$text"
   fi
 }
 
-log() { printf "[bdtool-install] %s\n" "$*"; }
-die() { echo "[bdtool-install][ERROR] $*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 is_root() { [[ "${EUID:-$(id -u)}" -eq 0 ]]; }
 
@@ -152,6 +176,12 @@ dl() {
   else
     die "需要 wget 或 curl（请先安装其一）"
   fi
+}
+
+dl_to_file() {
+  local url="$1"
+  local output="$2"
+  dl "$url" > "$output"
 }
 
 install_bdinfo_cli() {
@@ -180,16 +210,16 @@ install_bdinfo_cli() {
   tarball="$tmpd/BDInfo-linux-x64.tar.gz"
 
   msg bdinfo_install_start
-  dl "$url" > "$tarball"
-  tar -xzf "$tarball" -C "$tmpd"
+  execute_with_spinner "下载 BDInfoCLI-ng" dl_to_file "$url" "$tarball" || { rm -rf "$tmpd"; die "BDInfoCLI-ng 下载失败"; }
+  execute_with_spinner "解压 BDInfoCLI-ng" tar -xzf "$tarball" -C "$tmpd" || { rm -rf "$tmpd"; die "BDInfoCLI-ng 解压失败"; }
 
   bdinfo_bin="$(find "$tmpd" -type f -name BDInfo | head -n 1 || true)"
   [[ -n "$bdinfo_bin" && -f "$bdinfo_bin" ]] || { rm -rf "$tmpd"; die "BDInfoCLI-ng 安装失败：未找到 BDInfo 可执行文件"; }
 
   if need_cmd install; then
-    install -m 0755 "$bdinfo_bin" "$install_dir/BDInfo"
+    execute_with_spinner "安装 BDInfo 到 $install_dir" install -m 0755 "$bdinfo_bin" "$install_dir/BDInfo" || { rm -rf "$tmpd"; die "安装 BDInfo 失败"; }
   else
-    cp "$bdinfo_bin" "$install_dir/BDInfo"
+    execute_with_spinner "安装 BDInfo 到 $install_dir" cp "$bdinfo_bin" "$install_dir/BDInfo" || { rm -rf "$tmpd"; die "安装 BDInfo 失败"; }
     chmod +x "$install_dir/BDInfo"
   fi
   rm -rf "$tmpd"
@@ -210,35 +240,35 @@ install_deps() {
   SUDO="$(sudo_cmd)"
 
   if need_cmd apt-get; then
-    $SUDO apt-get update -y
-    $SUDO apt-get install -y ca-certificates curl wget git ffmpeg mediainfo docker.io
+    execute_with_spinner "apt 更新索引" $SUDO apt-get update -y || die "apt-get update 失败"
+    execute_with_spinner "apt 安装依赖" $SUDO apt-get install -y ca-certificates curl wget git ffmpeg mediainfo docker.io || die "apt-get install 失败"
     start_docker_best_effort
     return 0
   fi
 
   if need_cmd dnf; then
-    $SUDO dnf makecache -y || true
-    $SUDO dnf install -y ca-certificates curl wget git ffmpeg mediainfo docker || true
+    execute_with_spinner "dnf 更新缓存" $SUDO dnf makecache -y || true
+    execute_with_spinner "dnf 安装依赖" $SUDO dnf install -y ca-certificates curl wget git ffmpeg mediainfo docker || true
     start_docker_best_effort
     return 0
   fi
 
   if need_cmd yum; then
-    $SUDO yum makecache -y || true
-    $SUDO yum install -y ca-certificates curl wget git ffmpeg mediainfo docker || true
+    execute_with_spinner "yum 更新缓存" $SUDO yum makecache -y || true
+    execute_with_spinner "yum 安装依赖" $SUDO yum install -y ca-certificates curl wget git ffmpeg mediainfo docker || true
     start_docker_best_effort
     return 0
   fi
 
   if need_cmd apk; then
-    $SUDO apk add --no-cache ca-certificates curl wget git ffmpeg mediainfo docker
+    execute_with_spinner "apk 安装依赖" $SUDO apk add --no-cache ca-certificates curl wget git ffmpeg mediainfo docker || die "apk add 失败"
     $SUDO rc-update add docker default >/dev/null 2>&1 || true
     $SUDO service docker start >/dev/null 2>&1 || true
     return 0
   fi
 
   if need_cmd pacman; then
-    $SUDO pacman -Sy --noconfirm ca-certificates curl wget git ffmpeg mediainfo docker
+    execute_with_spinner "pacman 安装依赖" $SUDO pacman -Sy --noconfirm ca-certificates curl wget git ffmpeg mediainfo docker || die "pacman 安装失败"
     start_docker_best_effort
     return 0
   fi
@@ -247,18 +277,15 @@ install_deps() {
 }
 
 choose_install_dir() {
-  # root：优先 /usr/local/bin（基本都在 PATH）
   if is_root; then
     if [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
       echo "/usr/local/bin"
       return 0
     fi
-    # 兜底：root 家目录 bin（可能不在 PATH，但后面会提示）
     echo "$HOME/bin"
     return 0
   fi
 
-  # 非 root：优先 ~/.local/bin（更通用），否则 ~/bin
   if [[ -n "${HOME:-}" ]]; then
     if [[ -d "$HOME/.local/bin" || ! -e "$HOME/.local/bin" ]]; then
       echo "$HOME/.local/bin"
@@ -274,12 +301,10 @@ choose_install_dir() {
 ensure_path_for_user_dir() {
   local dir="$1"
 
-  # /usr/local/bin 这类系统目录一般已在 PATH，无需处理
   case "$dir" in
     /usr/local/bin|/usr/bin|/bin|/usr/sbin|/sbin) return 0 ;;
   esac
 
-  # 若当前 PATH 没包含该目录，则写入 ~/.bashrc（尽量不改别的 shell）
   if ! echo ":$PATH:" | grep -q ":$dir:"; then
     if [[ -f "$HOME/.bashrc" ]]; then
       if ! grep -qF "export PATH=\"$dir:\$PATH\"" "$HOME/.bashrc"; then
@@ -291,6 +316,7 @@ ensure_path_for_user_dir() {
   fi
 }
 
+section "PT-BDtool 安装"
 msg start "$DO_K"
 
 if [[ "$DO_K" == "1" ]]; then
@@ -302,7 +328,7 @@ BDTOOL_RAW_URL="https://raw.githubusercontent.com/My15sir/PT-BDtool/main/bdtool.
 INSTALL_DIR="$(choose_install_dir)"
 mkdir -p "$INSTALL_DIR"
 
-dl "$BDTOOL_RAW_URL" > "$INSTALL_DIR/bdtool"
+execute_with_spinner "下载 bdtool" dl_to_file "$BDTOOL_RAW_URL" "$INSTALL_DIR/bdtool" || die "下载 bdtool 失败"
 chmod +x "$INSTALL_DIR/bdtool"
 
 ensure_path_for_user_dir "$INSTALL_DIR"
