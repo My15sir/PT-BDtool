@@ -12,6 +12,11 @@ if [[ -t 2 ]]; then
   UI_BLUE='\033[0;34m'
   UI_CYAN='\033[0;36m'
   UI_GRAY='\033[0;90m'
+  if [[ "${TERM:-}" != "" ]]; then
+    UI_BEIGE='\033[38;5;223m'
+  else
+    UI_BEIGE='\033[0;33m'
+  fi
   UI_NC='\033[0m'
 else
   UI_RED=''
@@ -20,6 +25,7 @@ else
   UI_BLUE=''
   UI_CYAN=''
   UI_GRAY=''
+  UI_BEIGE=''
   UI_NC=''
 fi
 
@@ -28,6 +34,7 @@ warn() { printf "%b[WARN]%b %s\n" "$UI_YELLOW" "$UI_NC" "$*" >&2; }
 info() { printf "%b[INFO]%b %s\n" "$UI_CYAN" "$UI_NC" "$*" >&2; }
 success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
 hint() { printf "%b[HINT]%b %s\n" "$UI_GRAY" "$UI_NC" "$*" >&2; }
+menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
 
 # Backward-compatible aliases.
 log_info() { info "$@"; }
@@ -111,6 +118,30 @@ validate_int_range() {
   (( value >= min && value <= max ))
 }
 
+resolve_data_dir() {
+  if [[ -n "${BDTOOL_DATA_DIR:-}" ]]; then
+    printf "%s" "$BDTOOL_DATA_DIR"
+    return 0
+  fi
+
+  if [[ -d "/opt/PT-BDtool" ]]; then
+    if [[ -w "/opt/PT-BDtool" || "${EUID:-$(id -u)}" -eq 0 ]]; then
+      printf "%s" "/opt/PT-BDtool/bdtool-output"
+      return 0
+    fi
+  elif [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    printf "%s" "/opt/PT-BDtool/bdtool-output"
+    return 0
+  fi
+
+  if [[ -n "${HOME:-}" ]]; then
+    printf "%s" "$HOME/.local/share/pt-bdtool/bdtool-output"
+    return 0
+  fi
+
+  printf "%s" "/tmp/pt-bdtool/bdtool-output"
+}
+
 ensure_log_dir() {
   local root="${1:-${BDTOOL_ROOT:-}}"
   if [[ -z "$root" ]]; then
@@ -118,7 +149,8 @@ ensure_log_dir() {
   fi
 
   BDTOOL_ROOT="$root"
-  BDTOOL_LOG_DIR="$BDTOOL_ROOT/bdtool-output/logs"
+  BDTOOL_DATA_DIR="$(resolve_data_dir)"
+  BDTOOL_LOG_DIR="$BDTOOL_DATA_DIR/logs"
   BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"
 
   mkdir -p "$BDTOOL_LOG_DIR"
@@ -281,7 +313,7 @@ prompt_secret_with_rules() {
   while (( retry <= max_retry )); do
     value=""
 
-    if _consume_retry_value "$queue_key" 2>/dev/null; then
+    if _consume_retry_value "$queue_key" >/dev/null 2>&1; then
       value="${_PROMPT_CONSUMED_VALUE:-}"
     elif [[ -n "${!var_name:-}" ]]; then
       value="${!var_name}"
@@ -338,7 +370,7 @@ prompt_with_default_and_validate() {
   while (( retry <= max_retry )); do
     value=""
 
-    if _consume_retry_value "$queue_key" 2>/dev/null; then
+    if _consume_retry_value "$queue_key" >/dev/null 2>&1; then
       value="${_PROMPT_CONSUMED_VALUE:-}"
     elif [[ -n "${!var_name:-}" ]]; then
       value="${!var_name}"

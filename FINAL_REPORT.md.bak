@@ -1,92 +1,91 @@
 # FINAL_REPORT
 
-## 1) 能力保持与产品化目标
+## 变更目标
 
-本次改造在不删除能力集合前提下，完成了：
-- 新手模式：`bdtool` 无参数菜单入口（交互终端）。
-- 老手模式：`bdtool install/doctor/scan/clean/logs` 子命令。
-- 双语：菜单、帮助、错误提示支持 `zh/en`，支持 `--lang` 强制切换。
-- 统一 UI：颜色、section、spinner、错误态、日志路径提示。
-- 统一日志：所有 stdout/stderr 追加到 `./bdtool-output/logs/run.log`。
+实现“安装完成后自动跳转数字菜单界面”，并保证：
+- 仅在交互终端（TTY）自动进入菜单。
+- `--non-interactive` 或非 TTY 绝不进入菜单。
+- 菜单与帮助支持中英双语。
 
-保留能力：
-- install（调用 `install.sh`）
-- doctor（调用 `bdtool.sh doctor`）
-- scan（调用 `bdtool.sh scan ...`）
-- clean（调用 `bdtool.sh clean`）
+## 根因分析
 
-## 2) 无参数策略（按要求）
+用户“安装后看不到菜单/选项”来自两个问题：
+1. 安装器此前只提示 `Next: bdtool doctor`，未做安装成功后的菜单自动跳转。
+2. 入口脚本默认 `BDTOOL_NO_PROMPT=1`，会把无参数执行判定为非交互路径，导致只输出 help。
 
-- 无参数且交互终端：显示菜单。
-- 无参数且非交互终端：输出 help 并退出。
+## 修复点
 
-判定实现：以终端交互能力为准（无可交互输入时不进入菜单，避免阻塞）。
+1. `install.sh`：安装成功后自动拉起菜单
+- 新增 `auto_launch_menu_after_install`。
+- 条件：
+  - `AUTO_LAUNCH_MENU=1`（默认开启）
+  - 非 `--non-interactive`
+  - stdin 为 TTY
+- 启动逻辑：
+  - 优先 `command -v bdtool`
+  - 兜底 `./bdtool` 或 `./ptbd`
+  - 使用当前语言 `--lang <zh|en>`
+- 新增 `--non-interactive` 参数，明确禁止自动菜单。
 
-## 3) 旧用法 -> 新用法迁移表
+2. `bdtool`：数字菜单与策略
+- 无参数：
+  - TTY 且非 `--non-interactive` → 进入 `menu_loop`
+  - 非 TTY → 输出 help 并退出（退出码 0）
+- 菜单项（1-7）全部数字触发：
+  1) install
+  2) doctor
+  3) scan（无能力时 SKIP）
+  4) clean（危险操作，二次确认）
+  5) logs（默认 tail run.log）
+  6) switch language
+  7) quit
+- 输入规则：只接受 `1-7` 或 `q/Q`；非法输入输出红色 ERROR + HINT 并重试。
+- 保留子命令模式：`install/doctor/scan/clean/logs/--help`。
 
-| 旧用法 | 新用法 | 说明 |
+3. 双语策略
+- `--lang zh|en` 强制语言。
+- 默认语言：`LC_ALL/LANG` 含 `zh` 用中文，否则英文；未设置默认中文。
+
+## 改动文件清单
+
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
+- `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
+- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
+
+## 备份文件
+
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/bdtool.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
+
+## 复测结果（真实执行）
+
+日志文件：
+- 统一日志：`./bdtool-output/logs/run.log`
+- 菜单拉起测试：`./bdtool-output/logs/menu-launch-test.log`
+
+| 用例 | 命令 | 结果 |
 |---|---|---|
-| `./ptbd install` | `./bdtool install` | 旧入口 `ptbd` 保留为兼容转发 |
-| `./ptbd doctor` | `./bdtool doctor` | 等价 |
-| `./ptbd scan /path` | `./bdtool scan /path` | 等价，支持 `--lang` |
-| `./ptbd clean` | `./bdtool clean` | 新增双重确认；无人值守需 `--yes` |
-| `./bdtool.sh doctor` | `./bdtool doctor` | 推荐使用新入口 |
-| `./bdtool.sh scan /path ...` | `./bdtool scan /path ...` | 新入口做 UI/语言调度，业务仍复用 `bdtool.sh` |
-| `./bdtool.sh clean` | `./bdtool clean` | 新入口增加危险确认 |
+| INSTALL_AUTO_MENU | `printf "7\n" \| script -qec 'bash ./install.sh' /dev/null` | PASS（安装后自动进入菜单并退出） |
+| MENU_DISPATCH_LOGS_QUIT | `printf "5\n7\n" \| script -qec 'bdtool --lang zh' /dev/null` | PASS（数字 5 执行 logs，随后 7 退出） |
+| NONTTY_POLICY | `printf "7\n" \| bdtool` | PASS（按策略输出 help 并退出） |
+| COMMAND_PATH | `command -v bdtool` | PASS |
+| HELP | `bdtool --help --lang zh` | PASS |
+| DOCTOR | `bdtool doctor` | PASS |
+| LOGS | `bdtool logs --tail 20` | PASS |
 
-## 4) i18n 设计
-
-新增 `lib/i18n.sh`：
-- `LANG_CODE`：`zh/en`
-- `set_lang()`：解析 `--lang` / `BDTOOL_LANG` / `LC_ALL$LANG`（含 zh 用中文，否则英文；未设置默认中文）
-- `t(KEY)`：文案映射
-
-覆盖范围：
-- 标题、帮助、菜单项、提示、错误、确认、日志提示。
-
-## 5) 变更文件清单
-
-- 新增：`/media/15sir/DataHub/Github/PT-BDtool/lib/i18n.sh`
-- 新增：`/media/15sir/DataHub/Github/PT-BDtool/bdtool`
-- 修改：`/media/15sir/DataHub/Github/PT-BDtool/ptbd`
-- 修改：`/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
-
-备份：
-- `ptbd.bak`
-- `FINAL_REPORT.md.bak`
-
-## 6) 自测结果（真实执行）
-
-测试日志文件：
-- `./bdtool-output/logs/cli-menu-test.log`
-- 统一运行日志：`./bdtool-output/logs/run.log`
-
-| 用例 | 命令 | 结果 | 备注 |
-|---|---|---|---|
-| 1 | `./bdtool --help` | PASS | 英文环境默认英文帮助 |
-| 2 | `./bdtool --help --lang en` | PASS | 强制英文生效 |
-| 3 | `printf "6\n6\n7\n" | ./bdtool` | SKIP（策略命中） | 非交互输入场景按策略输出 help 并退出，不进入菜单 |
-| 4 | `printf "2\n7\n" | ./bdtool --lang en` | SKIP（策略命中） | 同上，未进入菜单，因此不执行 doctor |
-| 5 | `./bdtool logs --tail 20` | PASS | 正常输出日志 tail |
-
-## 7) 已知差异
-
-- 为避免无人值守阻塞，无参数但非交互输入时，严格走 help 退出策略，不消费管道输入菜单项。
-
-## 8) 回滚命令
+## 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-cp -f ptbd.bak ptbd
+cp -f install.sh.bak install.sh
+cp -f bdtool.bak bdtool
 cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
-rm -f bdtool
-rm -f lib/i18n.sh
 ```
 
-可选 git 回滚（如已纳入版本控制）：
+可选 git 回滚：
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- ptbd FINAL_REPORT.md
-git clean -f bdtool lib/i18n.sh
+git checkout -- install.sh bdtool FINAL_REPORT.md
 ```

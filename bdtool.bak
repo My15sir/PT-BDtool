@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BDTOOL_ROOT="$ROOT_DIR"
 export BDTOOL_ROOT
+: "${BDTOOL_NO_PROMPT:=0}"
 
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
@@ -193,7 +194,7 @@ cmd_scan() {
   done
 
   if [[ -z "$scan_path" ]]; then
-    if [[ -t 1 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
+    if [[ -t 0 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
       scan_path="$(prompt_with_default "$(t SCAN_PATH_PROMPT)" ".")"
     else
       scan_path="."
@@ -284,6 +285,10 @@ switch_language() {
   fi
 }
 
+has_scan_capability() {
+  [[ -x "$ROOT_DIR/bdtool.sh" ]]
+}
+
 menu_loop() {
   while true; do
     show_banner
@@ -299,27 +304,64 @@ menu_loop() {
 
     local choice
     if [[ -t 0 ]]; then
-      read -r -p "$(t MENU_PROMPT): " choice || true
+      if ! read -r -p "$(t MENU_PROMPT): " choice; then
+        info "$(t MENU_BYE)"
+        return 0
+      fi
     else
-      IFS= read -r choice || true
+      if ! IFS= read -r choice; then
+        info "$(t MENU_BYE)"
+        return 0
+      fi
     fi
 
     case "$choice" in
       1) cmd_install --non-interactive ;;
       2) cmd_doctor ;;
-      3) cmd_scan . --mode dry ;;
+      3)
+        if has_scan_capability; then
+          cmd_scan . --mode dry
+        else
+          warn "scan capability not found, SKIP"
+          hint "$(t HINT_LOG): $BDTOOL_RUN_LOG"
+        fi
+        ;;
       4) cmd_clean ;;
       5) cmd_logs --tail 50 ;;
       6) switch_language ;;
       7|q|Q) info "$(t MENU_BYE)"; return 0 ;;
-      *) error "$(t MENU_INVALID)" ;;
+      *)
+        error "$(t MENU_INVALID)"
+        hint "$(t MENU_PROMPT)"
+        ;;
     esac
   done
 }
 
 main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang)
+        [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+        set_lang "$2"
+        shift 2
+        ;;
+      --lang=*)
+        set_lang "${1#*=}"
+        shift
+        ;;
+      --non-interactive)
+        export BDTOOL_NO_PROMPT=1
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
   if [[ $# -eq 0 ]]; then
-    if [[ -t 1 ]]; then
+    if [[ -t 0 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
       menu_loop
       return 0
     fi
@@ -349,9 +391,6 @@ main() {
       ;;
     logs)
       cmd_logs "$@"
-      ;;
-    --lang|--lang=*)
-      show_help
       ;;
     *)
       die_with_hint "unknown command: $cmd"

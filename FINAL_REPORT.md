@@ -1,85 +1,86 @@
 # FINAL_REPORT
 
-## 变更目标
-
-实现“安装完成后自动跳转数字菜单界面”，并保证：
-- 仅在交互终端（TTY）自动进入菜单。
-- `--non-interactive` 或非 TTY 绝不进入菜单。
-- 菜单与帮助支持中英双语。
-
 ## 根因分析
 
-用户“安装后看不到菜单/选项”来自两个问题：
-1. 安装器此前只提示 `Next: bdtool doctor`，未做安装成功后的菜单自动跳转。
-2. 入口脚本默认 `BDTOOL_NO_PROMPT=1`，会把无参数执行判定为非交互路径，导致只输出 help。
+1. 菜单失败后掉回 shell 的根因：
+- 菜单项执行直接调用 `cmd_scan/cmd_doctor/...`，这些函数内部失败时会 `die`，导致整个 `bdtool` 进程退出。
+- 进程退出后用户继续输入 `4/5/6` 就变成 shell 命令，从而出现 `command not found`。
+
+2. 日志路径错到 `/usr/local/bin/bdtool-output` 的根因：
+- 旧逻辑把 `BDTOOL_ROOT` 设为入口脚本所在目录；安装后入口位于 `/usr/local/bin` 或 `~/.local/bin`，于是日志目录被拼到该路径下。
 
 ## 修复点
 
-1. `install.sh`：安装成功后自动拉起菜单
-- 新增 `auto_launch_menu_after_install`。
-- 条件：
-  - `AUTO_LAUNCH_MENU=1`（默认开启）
-  - 非 `--non-interactive`
-  - stdin 为 TTY
-- 启动逻辑：
-  - 优先 `command -v bdtool`
-  - 兜底 `./bdtool` 或 `./ptbd`
-  - 使用当前语言 `--lang <zh|en>`
-- 新增 `--non-interactive` 参数，明确禁止自动菜单。
+### A) 菜单循环“失败不退出”
 
-2. `bdtool`：数字菜单与策略
-- 无参数：
-  - TTY 且非 `--non-interactive` → 进入 `menu_loop`
-  - 非 TTY → 输出 help 并退出（退出码 0）
-- 菜单项（1-7）全部数字触发：
-  1) install
-  2) doctor
-  3) scan（无能力时 SKIP）
-  4) clean（危险操作，二次确认）
-  5) logs（默认 tail run.log）
-  6) switch language
-  7) quit
-- 输入规则：只接受 `1-7` 或 `q/Q`；非法输入输出红色 ERROR + HINT 并重试。
-- 保留子命令模式：`install/doctor/scan/clean/logs/--help`。
+- 菜单循环保持 `while true`，仅在 `7/q/Q` 时退出。
+- 新增 `run_menu_action`：
+  - 通过子 shell 执行菜单动作并捕获 `rc`。
+  - `rc != 0` 时打印 `error + hint + RUN_LOG`。
+  - 无论成功失败都执行 `menu_pause`（按回车返回菜单）。
+- 删除/避免菜单层透传非零返回码退出进程。
+- 去除安装器里类似 `menu exited with non-zero status` 的告警输出。
 
-3. 双语策略
-- `--lang zh|en` 强制语言。
-- 默认语言：`LC_ALL/LANG` 含 `zh` 用中文，否则英文；未设置默认中文。
+### B) 数据目录与日志路径修复
+
+在 `lib/ui.sh` 新增 `resolve_data_dir()` 策略：
+1. 若设置 `BDTOOL_DATA_DIR`，优先使用。
+2. 若 `/opt/PT-BDtool` 存在且可写（或 root），用 `/opt/PT-BDtool/bdtool-output`。
+3. 否则用 `$HOME/.local/share/pt-bdtool/bdtool-output`。
+4. 再兜底 `/tmp/pt-bdtool/bdtool-output`。
+
+`ensure_log_dir()` 统一设置：
+- `BDTOOL_LOG_DIR="$BDTOOL_DATA_DIR/logs"`
+- `BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"`
+
+确保日志提示不再出现 `/usr/local/bin/bdtool-output/...`。
+
+### C) 米黄色菜单主题
+
+在 `lib/ui.sh` 新增米黄色：
+- 优先 256 色：`\033[38;5;223m`
+- fallback：`\033[33m`
+
+新增 `menu_option()` 并用于菜单 1~7 行显示。
+
+### D) install 自动进入菜单
+
+- 仅在交互场景自动跳转（`AUTO_LAUNCH_MENU=1` 且非 `--non-interactive` 且 stdin 为 TTY）。
+- 启动命令不再因菜单返回码打印误导性 WARN。
 
 ## 改动文件清单
 
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
 
 ## 备份文件
 
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh.bak`
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
 
-## 复测结果（真实执行）
+## 复测结果
 
 日志文件：
-- 统一日志：`./bdtool-output/logs/run.log`
-- 菜单拉起测试：`./bdtool-output/logs/menu-launch-test.log`
+- `run.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/run.log`
+- `menu-loop-test.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/menu-loop-test.log`
 
 | 用例 | 命令 | 结果 |
 |---|---|---|
-| INSTALL_AUTO_MENU | `printf "7\n" \| script -qec 'bash ./install.sh' /dev/null` | PASS（安装后自动进入菜单并退出） |
-| MENU_DISPATCH_LOGS_QUIT | `printf "5\n7\n" \| script -qec 'bdtool --lang zh' /dev/null` | PASS（数字 5 执行 logs，随后 7 退出） |
-| NONTTY_POLICY | `printf "7\n" \| bdtool` | PASS（按策略输出 help 并退出） |
-| COMMAND_PATH | `command -v bdtool` | PASS |
-| HELP | `bdtool --help --lang zh` | PASS |
-| DOCTOR | `bdtool doctor` | PASS |
-| LOGS | `bdtool logs --tail 20` | PASS |
+| 菜单失败回菜单 | `printf "3\n\n7\n" \| bdtool --lang zh` | PASS（scan 失败后显示 error+hint，回车后返回菜单，再 7 正常退出） |
+| 菜单成功回菜单 | `printf "2\n\n7\n" \| bdtool --lang zh` | PASS（doctor 成功后回车返回菜单，再 7 退出） |
+| 安装后入口可用 | `env BDTOOL_NO_PROMPT=1 AUTO_LAUNCH_MENU=0 bash ./install.sh` | PASS |
 
 ## 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-cp -f install.sh.bak install.sh
+cp -f lib/ui.sh.bak lib/ui.sh
 cp -f bdtool.bak bdtool
+cp -f install.sh.bak install.sh
 cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 ```
 
@@ -87,5 +88,5 @@ cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- install.sh bdtool FINAL_REPORT.md
+git checkout -- lib/ui.sh bdtool install.sh FINAL_REPORT.md
 ```

@@ -49,10 +49,10 @@ GITHUB_URL="https://github.com/My15sir/PT-BDtool"
 show_banner() {
   section "PT-BDtool"
   echo " ____ ______   ____  ____           _ "
-  echo "|  _ \_   _| | __ )|  _ \ ___  ___| |"
-  echo "| |_) || |   |  _ \| |_) / _ \/ __| |"
-  echo "|  __/ | |   | |_) |  _ <  __/\__ \_|"
-  echo "|_|    |_|   |____/|_| \_\___||___(_)"
+  echo "|  _ \\_   _| | __ )|  _ \\ ___  ___| |"
+  echo "| |_) || |   |  _ \\| |_) / _ \\/ __| |"
+  echo "|  __/ | |   | |_) |  _ <  __/\\__ \\_|"
+  echo "|_|    |_|   |____/|_| \\_\\___||___(_)"
   info "$(t APP_TITLE)"
   info "$(t APP_SUBTITLE)"
   info "Version: $APP_VERSION"
@@ -242,7 +242,7 @@ cmd_clean() {
 }
 
 cmd_logs() {
-  local tail_n=50
+  local tail_n=80
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --tail)
@@ -289,17 +289,53 @@ has_scan_capability() {
   [[ -x "$ROOT_DIR/bdtool.sh" ]]
 }
 
+menu_pause() {
+  local text_zh="按回车返回菜单"
+  local text_en="Press Enter to return"
+  if [[ "$LANG_CODE" == "zh" ]]; then
+    info "$text_zh"
+  else
+    info "$text_en"
+  fi
+
+  if [[ -t 0 ]]; then
+    read -r -p "" _ || true
+  else
+    IFS= read -r _ || true
+  fi
+}
+
+run_menu_action() {
+  local label="$1"
+  shift
+
+  local rc=0
+  if ( "$@" ); then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  if [[ "$rc" -ne 0 ]]; then
+    error "$label failed (rc=$rc)"
+    hint "$(t HINT_LOG): $BDTOOL_RUN_LOG"
+  fi
+
+  menu_pause
+  return 0
+}
+
 menu_loop() {
   while true; do
     show_banner
     hr
-    echo "$(t MENU_1)"
-    echo "$(t MENU_2)"
-    echo "$(t MENU_3)"
-    echo "$(t MENU_4)"
-    echo "$(t MENU_5)"
-    echo "$(t MENU_6)"
-    echo "$(t MENU_7)"
+    menu_option "1) $(t MENU_1 | sed 's/^1) //')"
+    menu_option "2) $(t MENU_2 | sed 's/^2) //')"
+    menu_option "3) $(t MENU_3 | sed 's/^3) //')"
+    menu_option "4) $(t MENU_4 | sed 's/^4) //')"
+    menu_option "5) $(t MENU_5 | sed 's/^5) //')"
+    menu_option "6) $(t MENU_6 | sed 's/^6) //')"
+    menu_option "7) $(t MENU_7 | sed 's/^7) //')"
     hr
 
     local choice
@@ -316,20 +352,27 @@ menu_loop() {
     fi
 
     case "$choice" in
-      1) cmd_install --non-interactive ;;
-      2) cmd_doctor ;;
+      1) run_menu_action "install" cmd_install --non-interactive ;;
+      2) run_menu_action "doctor" cmd_doctor ;;
       3)
         if has_scan_capability; then
-          cmd_scan . --mode dry
+          run_menu_action "scan" cmd_scan . --mode dry
         else
           warn "scan capability not found, SKIP"
           hint "$(t HINT_LOG): $BDTOOL_RUN_LOG"
+          menu_pause
         fi
         ;;
-      4) cmd_clean ;;
-      5) cmd_logs --tail 50 ;;
-      6) switch_language ;;
-      7|q|Q) info "$(t MENU_BYE)"; return 0 ;;
+      4) run_menu_action "clean" cmd_clean ;;
+      5) run_menu_action "logs" cmd_logs --tail 80 ;;
+      6)
+        switch_language
+        menu_pause
+        ;;
+      7|q|Q)
+        info "$(t MENU_BYE)"
+        return 0
+        ;;
       *)
         error "$(t MENU_INVALID)"
         hint "$(t MENU_PROMPT)"
@@ -361,7 +404,7 @@ main() {
   done
 
   if [[ $# -eq 0 ]]; then
-    if [[ -t 0 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
+    if [[ "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
       menu_loop
       return 0
     fi
