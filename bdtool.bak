@@ -193,7 +193,7 @@ cmd_scan() {
   done
 
   if [[ -z "$scan_path" ]]; then
-    if [[ -t 0 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
+    if [[ -t 1 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
       scan_path="$(prompt_with_default "$(t SCAN_PATH_PROMPT)" ".")"
     else
       scan_path="."
@@ -299,15 +299,9 @@ menu_loop() {
 
     local choice
     if [[ -t 0 ]]; then
-      if ! read -r -p "$(t MENU_PROMPT): " choice; then
-        info "$(t MENU_BYE)"
-        return 0
-      fi
+      read -r -p "$(t MENU_PROMPT): " choice || true
     else
-      if ! IFS= read -r choice; then
-        info "$(t MENU_BYE)"
-        return 0
-      fi
+      IFS= read -r choice || true
     fi
 
     case "$choice" in
@@ -325,12 +319,7 @@ menu_loop() {
 
 main() {
   if [[ $# -eq 0 ]]; then
-    if [[ -t 0 ]]; then
-      menu_loop
-      return 0
-    fi
-    # Support non-interactive piped menu input (e.g. printf "7\n" | bdtool).
-    if [[ -p /dev/stdin ]]; then
+    if [[ -t 1 ]]; then
       menu_loop
       return 0
     fi

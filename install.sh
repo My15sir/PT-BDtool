@@ -363,18 +363,42 @@ ensure_path_for_user_dir() {
   fi
 }
 
-download_bdtool_binary() {
-  local out="$1"
-  if [[ -f "$SCRIPT_DIR/bdtool.sh" ]]; then
-    cp -f "$SCRIPT_DIR/bdtool.sh" "$out"
+download_repo_file() {
+  local rel="$1"
+  local out="$2"
+
+  if [[ -f "$SCRIPT_DIR/$rel" ]]; then
+    cp -f "$SCRIPT_DIR/$rel" "$out"
     [[ -s "$out" ]] && return 0
   fi
 
   local urls=(
-    "https://raw.githubusercontent.com/My15sir/PT-BDtool/main/bdtool.sh"
-    "https://cdn.jsdelivr.net/gh/My15sir/PT-BDtool@main/bdtool.sh"
+    "https://raw.githubusercontent.com/My15sir/PT-BDtool/main/$rel"
+    "https://cdn.jsdelivr.net/gh/My15sir/PT-BDtool@main/$rel"
   )
   fetch_with_fallbacks "$out" "${urls[@]}"
+}
+
+install_cli_bundle() {
+  local install_dir="$1"
+  local tmpd
+  tmpd="$(mktemp -d)"
+  mkdir -p "$install_dir/lib"
+
+  download_repo_file "bdtool" "$tmpd/bdtool" || { rm -rf "$tmpd"; return 1; }
+  download_repo_file "bdtool.sh" "$tmpd/bdtool.sh" || { rm -rf "$tmpd"; return 1; }
+  download_repo_file "install.sh" "$tmpd/install.sh" || { rm -rf "$tmpd"; return 1; }
+  download_repo_file "lib/ui.sh" "$tmpd/ui.sh" || { rm -rf "$tmpd"; return 1; }
+  download_repo_file "lib/i18n.sh" "$tmpd/i18n.sh" || { rm -rf "$tmpd"; return 1; }
+
+  install -m 0755 "$tmpd/bdtool" "$install_dir/bdtool"
+  install -m 0755 "$tmpd/bdtool.sh" "$install_dir/bdtool.sh"
+  install -m 0755 "$tmpd/install.sh" "$install_dir/install.sh"
+  install -m 0644 "$tmpd/ui.sh" "$install_dir/lib/ui.sh"
+  install -m 0644 "$tmpd/i18n.sh" "$install_dir/lib/i18n.sh"
+
+  rm -rf "$tmpd"
+  return 0
 }
 
 install_bdinfo_cli() {
@@ -476,11 +500,18 @@ fi
 INSTALL_DIR="$(choose_install_dir)"
 mkdir -p "$INSTALL_DIR"
 
-info "下载 bdtool..."
-download_bdtool_binary "$INSTALL_DIR/bdtool" || die "failed to download bdtool (check network/proxy and $BDTOOL_RUN_LOG)"
-chmod +x "$INSTALL_DIR/bdtool"
+info "安装 CLI 入口与运行所需脚本..."
+install_cli_bundle "$INSTALL_DIR" || die "failed to install cli bundle (check network/proxy and $BDTOOL_RUN_LOG)"
 
 ensure_path_for_user_dir "$INSTALL_DIR"
+hash -r 2>/dev/null || true
+
+if ! command -v bdtool >/dev/null 2>&1; then
+  hint "若未生效，请重新打开终端或手动执行：export PATH=\"$INSTALL_DIR:\$PATH\""
+  die "bdtool command is not found after install"
+fi
+success "bdtool command ready: $(command -v bdtool)"
+
 if ! need_cmd BDInfo; then
   install_bdinfo_cli "$INSTALL_DIR" || warn "BDInfo install failed, continue"
 fi
