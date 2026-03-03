@@ -7,6 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 BOOT_TIMEOUT="${PTBD_BOOTSTRAP_TIMEOUT:-300}"
 BOOT_RETRY_MAX="${PTBD_BOOTSTRAP_RETRY:-3}"
+APT_TIMEOUT="${APT_TIMEOUT:-300}"
+APT_RETRY_MAX="${APT_RETRY_MAX:-3}"
+APT_LOCK_WAIT="${APT_LOCK_WAIT:-60}"
+APT_QUIET="${APT_QUIET:-1}"
 BOOT_URL_BASE="https://github.com/My15sir/PT-BDtool/archive/refs/heads"
 BOOT_TARBALL_URL="${PTBD_BOOTSTRAP_TARBALL_URL:-$BOOT_URL_BASE/main.tar.gz}"
 BOOT_ZIPBALL_URL="${PTBD_BOOTSTRAP_ZIPBALL_URL:-$BOOT_URL_BASE/main.zip}"
@@ -437,6 +441,9 @@ done
 set_lang "$LANG_OVERRIDE"
 
 INSTALL_ROOT=""
+APT_UPDATED=0
+APT_SUDO_CMD=()
+export DEBIAN_FRONTEND=noninteractive
 
 install_target_root() {
   local target_root
@@ -465,73 +472,180 @@ install_target_root() {
   INSTALL_ROOT="$target_root"
 }
 
-pkg_manager_install() {
-  local pkg="$1"
-  local updated="${2:-0}"
-
-  if command -v apt-get >/dev/null 2>&1; then
-    local sudo_cmd=()
-    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-      if command -v sudo >/dev/null 2>&1; then
-        sudo_cmd=(sudo)
-      else
-        return 1
-      fi
-    fi
-
-    if [[ ${#sudo_cmd[@]} -gt 0 ]]; then
-      screen "正在使用 root 安装依赖..."
-    fi
-
-    if [[ "$updated" == "0" ]]; then
-      run_ext_boot 300 "${sudo_cmd[@]}" apt-get update >/dev/null 2>&1 || return 2
-    fi
-
-    run_ext_boot 300 "${sudo_cmd[@]}" apt-get install -y "$pkg" >/dev/null 2>&1 || return 3
+setup_apt_privilege() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    APT_SUDO_CMD=()
     return 0
   fi
+  if command -v sudo >/dev/null 2>&1; then
+    APT_SUDO_CMD=(sudo)
+    screen "正在使用 root 执行 apt 操作..."
+    return 0
+  fi
+  return 1
+}
 
-  return 4
+is_cmd_installed() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+show_apt_lock_holder() {
+  local lock_file="$1"
+  if command -v fuser >/dev/null 2>&1; then
+    fuser "$lock_file" 2>/dev/null | sed 's/^/占用进程 PID: /' || true
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof "$lock_file" 2>/dev/null | tail -n +2 | awk '{print "占用进程 PID: "$2" CMD: "$1}' || true
+    return
+  fi
+  screen "提示：可安装 lsof/fuser 以显示锁占用进程。"
+}
+
+wait_for_apt_lock() {
+  local max_wait="${1:-60}"
+  local elapsed=0
+  local lock1="/var/lib/dpkg/lock-frontend"
+  local lock2="/var/lib/apt/lists/lock"
+  local lock3="/var/cache/apt/archives/lock"
+
+  while (( elapsed < max_wait )); do
+    if pgrep -x apt >/dev/null 2>&1 || pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -f unattended-upgrades >/dev/null 2>&1; then
+      screen "检测到 apt/dpkg 正在占用，等待中（${elapsed}/${max_wait}s）..."
+    elif [[ -e "$lock1" || -e "$lock2" || -e "$lock3" ]]; then
+      screen "检测到 apt 锁文件，等待中（${elapsed}/${max_wait}s）..."
+    else
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+
+  screen_error "有其他 apt 进程占用，等待超过 ${max_wait}s。"
+  [[ -e "$lock1" ]] && show_apt_lock_holder "$lock1"
+  [[ -e "$lock2" ]] && show_apt_lock_holder "$lock2"
+  [[ -e "$lock3" ]] && show_apt_lock_holder "$lock3"
+  return 1
+}
+
+run_timeout_retry() {
+  local desc="$1"
+  shift
+  local attempt rc sleep_s
+
+  for ((attempt=1; attempt<=APT_RETRY_MAX; attempt++)); do
+    if run_ext_boot "$APT_TIMEOUT" "$@"; then
+      return 0
+    fi
+    rc=$?
+    if [[ "$rc" -eq 124 ]]; then
+      screen_error "${desc} 超时（>${APT_TIMEOUT}s），第 ${attempt}/${APT_RETRY_MAX} 次失败。"
+    else
+      screen_error "${desc} 失败（rc=${rc}），第 ${attempt}/${APT_RETRY_MAX} 次失败。"
+    fi
+    if (( attempt >= APT_RETRY_MAX )); then
+      return "$rc"
+    fi
+    sleep_s=$((2 ** (attempt - 1)))
+    sleep "$sleep_s"
+  done
+  return 1
+}
+
+apt_update() {
+  if [[ "$APT_UPDATED" -eq 1 ]]; then
+    return 0
+  fi
+  wait_for_apt_lock "$APT_LOCK_WAIT" || return 1
+  screen "正在执行 apt-get update（超时 ${APT_TIMEOUT}s）..."
+  if [[ "$APT_QUIET" == "1" ]]; then
+    run_timeout_retry "apt-get update" "${APT_SUDO_CMD[@]}" apt-get -y -qq update || return 1
+  else
+    run_timeout_retry "apt-get update" "${APT_SUDO_CMD[@]}" apt-get -y update || return 1
+  fi
+  APT_UPDATED=1
+  return 0
+}
+
+apt_install() {
+  local pkgs=("$@")
+  wait_for_apt_lock "$APT_LOCK_WAIT" || return 1
+  screen "正在安装 ${pkgs[*]}（超时 ${APT_TIMEOUT}s）..."
+  if [[ "$APT_QUIET" == "1" ]]; then
+    run_timeout_retry "apt-get install ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y -qq install "${pkgs[@]}"
+  else
+    run_timeout_retry "apt-get install ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y install "${pkgs[@]}"
+  fi
+}
+
+show_apt_failure_suggestions() {
+  screen "建议排查："
+  screen "1) 检查网络与软件源可用性。"
+  screen "2) 手动验证：apt-get update"
+  screen "3) 检查是否有 unattended-upgrades/apt 占用锁。"
 }
 
 check_and_install_dep() {
   local dep_cmd="$1"
   local dep_pkg="$2"
-  local -n updated_ref=$3
-
-  if command -v "$dep_cmd" >/dev/null 2>&1; then
+  if is_cmd_installed "$dep_cmd"; then
     screen "$dep_cmd $(t DEPEND_OK)"
     return 0
   fi
 
+  screen "检查依赖：$dep_cmd 未安装"
   screen "$dep_cmd $(t DEPEND_INSTALLING)"
-  if pkg_manager_install "$dep_pkg" "$updated_ref"; then
-    updated_ref=1
-    if command -v "$dep_cmd" >/dev/null 2>&1; then
-      screen "$dep_cmd $(t DEPEND_OK)"
-      return 0
-    fi
+
+  if ! apt_update; then
+    screen_error "$dep_cmd 安装前 apt-get update 失败。"
+    show_apt_failure_suggestions
+    return 1
   fi
 
-  screen_error "$dep_cmd $(t DEPEND_FAIL)"
+  if ! apt_install "$dep_pkg"; then
+    screen_error "$dep_cmd $(t DEPEND_FAIL)"
+    show_apt_failure_suggestions
+    return 1
+  fi
+
+  if is_cmd_installed "$dep_cmd"; then
+    screen "$dep_cmd $(t DEPEND_OK)"
+    return 0
+  fi
+
+  screen_error "$dep_cmd 安装后仍不可用。"
+  show_apt_failure_suggestions
   return 1
 }
 
 section "PT-BDtool"
-updated_once=0
 failed_dep=0
+if ! setup_apt_privilege; then
+  screen_error "缺少 root/sudo 权限，无法自动安装依赖。"
+  failed_dep=1
+fi
 
-check_and_install_dep bash bash updated_once || failed_dep=1
-check_and_install_dep find findutils updated_once || failed_dep=1
-check_and_install_dep awk gawk updated_once || failed_dep=1
-check_and_install_dep sed sed updated_once || failed_dep=1
-check_and_install_dep sort coreutils updated_once || failed_dep=1
-check_and_install_dep timeout coreutils updated_once || failed_dep=1
-check_and_install_dep zip zip updated_once || failed_dep=1
-check_and_install_dep tar tar updated_once || failed_dep=1
-check_and_install_dep ffmpeg ffmpeg updated_once || true
-check_and_install_dep ffprobe ffmpeg updated_once || true
-check_and_install_dep mediainfo mediainfo updated_once || true
+check_and_install_dep bash bash || failed_dep=1
+check_and_install_dep find findutils || failed_dep=1
+check_and_install_dep awk gawk || failed_dep=1
+check_and_install_dep sed sed || failed_dep=1
+check_and_install_dep sort coreutils || failed_dep=1
+check_and_install_dep timeout coreutils || failed_dep=1
+check_and_install_dep zip zip || failed_dep=1
+check_and_install_dep tar tar || failed_dep=1
+check_and_install_dep ffmpeg ffmpeg || true
+check_and_install_dep ffprobe ffmpeg || true
+check_and_install_dep mediainfo mediainfo || true
+
+if [[ -n "${PTBD_EXTRA_DEPS:-}" ]]; then
+  IFS=',' read -r -a _extra_deps <<< "$PTBD_EXTRA_DEPS"
+  for dep_item in "${_extra_deps[@]}"; do
+    _dep_cmd="${dep_item%%:*}"
+    _dep_pkg="${dep_item#*:}"
+    [[ -n "$_dep_cmd" && -n "$_dep_pkg" ]] || continue
+    check_and_install_dep "$_dep_cmd" "$_dep_pkg" || failed_dep=1
+  done
+fi
 
 if [[ "$failed_dep" -ne 0 ]]; then
   ensure_output_root
