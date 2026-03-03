@@ -1,6 +1,6 @@
 # PT-BDtool
 
-🇨🇳 中文说明：see [README.md](README.md)
+🇨🇳 [中文](README.md)
 
 A Bash tool for generating PT upload materials automatically.
 
