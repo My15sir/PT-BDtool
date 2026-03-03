@@ -164,6 +164,7 @@ run_cmd_logged() {
   _run_command_with_timeout "$timeout_s" "$@" >> "$BDTOOL_RUN_LOG" 2>&1
   ret=$?
 
+  ensure_log_dir "${BDTOOL_ROOT:-}"
   ts_end="$(date '+%Y-%m-%d %H:%M:%S')"
   if [[ "$ret" -eq 124 ]]; then
     printf "[%s] [TIMEOUT] %s | timeout=%ss\n" "$ts_end" "$msg" "$timeout_s" >> "$BDTOOL_RUN_LOG"

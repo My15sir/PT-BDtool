@@ -11,6 +11,7 @@ if [[ -t 2 ]]; then
   UI_YELLOW='\033[0;33m'
   UI_BLUE='\033[0;34m'
   UI_CYAN='\033[0;36m'
+  UI_GRAY='\033[0;90m'
   UI_NC='\033[0m'
 else
   UI_RED=''
@@ -18,13 +19,21 @@ else
   UI_YELLOW=''
   UI_BLUE=''
   UI_CYAN=''
+  UI_GRAY=''
   UI_NC=''
 fi
 
-log_info() { printf "%b[INFO]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
-log_warn() { printf "%b[WARN]%b %s\n" "$UI_YELLOW" "$UI_NC" "$*" >&2; }
-log_err() { printf "%b[ERROR]%b %s\n" "$UI_RED" "$UI_NC" "$*" >&2; }
-log_success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
+error() { printf "%b[ERROR]%b %s\n" "$UI_RED" "$UI_NC" "$*" >&2; }
+warn() { printf "%b[WARN]%b %s\n" "$UI_YELLOW" "$UI_NC" "$*" >&2; }
+info() { printf "%b[INFO]%b %s\n" "$UI_CYAN" "$UI_NC" "$*" >&2; }
+success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
+hint() { printf "%b[HINT]%b %s\n" "$UI_GRAY" "$UI_NC" "$*" >&2; }
+
+# Backward-compatible aliases.
+log_info() { info "$@"; }
+log_warn() { warn "$@"; }
+log_err() { error "$@"; }
+log_success() { success "$@"; }
 
 hr() {
   printf "%b================================================================%b\n" "$UI_BLUE" "$UI_NC" >&2
@@ -36,14 +45,23 @@ section() {
   hr
 }
 
+error_box() {
+  local title="${1:-错误}"
+  local body="${2:-请查看日志并重试。}"
+  printf "%b+--------------------------------------------------------------+%b\n" "$UI_RED" "$UI_NC" >&2
+  printf "%b| [ERROR] %-53s|%b\n" "$UI_RED" "$title" "$UI_NC" >&2
+  printf "%b+--------------------------------------------------------------+%b\n" "$UI_RED" "$UI_NC" >&2
+  printf "%b%s%b\n" "$UI_RED" "$body" "$UI_NC" >&2
+}
+
 confirm() {
   local prompt="${1:-确认继续？}"
   local default="${2:-N}"
   local ans=""
-  local hint="[y/N]"
+  local hint_text="[y/N]"
 
   if [[ "$default" =~ ^[Yy]$ ]]; then
-    hint="[Y/n]"
+    hint_text="[Y/n]"
   fi
 
   if [[ "$BDTOOL_NO_PROMPT" == "1" || ! -t 0 ]]; then
@@ -51,14 +69,14 @@ confirm() {
   fi
 
   while true; do
-    read -r -p "  ▶ ${prompt} ${hint}: " ans < /dev/tty || true
+    read -r -p "  > ${prompt} ${hint_text}: " ans < /dev/tty || true
     if [[ -z "$ans" ]]; then
       ans="$default"
     fi
     case "$ans" in
       [Yy]) return 0 ;;
       [Nn]) return 1 ;;
-      *) log_warn "无效输入，请输入 y 或 n。" ;;
+      *) warn "无效输入，请输入 y 或 n。" ;;
     esac
   done
 }
@@ -73,7 +91,7 @@ prompt_with_default() {
     return 0
   fi
 
-  read -r -p "  ▶ ${prompt} [默认 ${default}]: " value < /dev/tty || true
+  read -r -p "  > ${prompt} [默认 ${default}]: " value < /dev/tty || true
   if [[ -z "$value" ]]; then
     value="$default"
   fi
@@ -164,7 +182,6 @@ run_cmd_logged() {
   _run_command_with_timeout "$timeout_s" "$@" >> "$BDTOOL_RUN_LOG" 2>&1
   ret=$?
 
-  ensure_log_dir "${BDTOOL_ROOT:-}"
   ts_end="$(date '+%Y-%m-%d %H:%M:%S')"
   if [[ "$ret" -eq 124 ]]; then
     printf "[%s] [TIMEOUT] %s | timeout=%ss\n" "$ts_end" "$msg" "$timeout_s" >> "$BDTOOL_RUN_LOG"
@@ -181,16 +198,18 @@ execute_with_spinner() {
 
   run_cmd_logged "$msg" "$@" &
   local pid=$!
-  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local spin='|/-\\'
   local delay=0.1
 
   if [[ -t 2 ]]; then
     printf "\e[?25l" >&2
     while kill -0 "$pid" 2>/dev/null; do
-      local head="${spin:0:1}"
-      spin="${spin:1}${head}"
-      printf "\r\033[K %b[%s]%b %s..." "$UI_CYAN" "$head" "$UI_NC" "$msg" >&2
-      sleep "$delay"
+      local i
+      for ((i=0; i<${#spin}; i++)); do
+        kill -0 "$pid" 2>/dev/null || break
+        printf "\r\033[K %b[%c]%b %s..." "$UI_CYAN" "${spin:$i:1}" "$UI_NC" "$msg" >&2
+        sleep "$delay"
+      done
     done
     printf "\e[?25h" >&2
   fi
@@ -200,25 +219,148 @@ execute_with_spinner() {
 
   if [[ "$ret" -eq 0 ]]; then
     if [[ -t 2 ]]; then
-      printf "\r\033[K %b[√]%b %s... 完成\n" "$UI_GREEN" "$UI_NC" "$msg" >&2
+      printf "\r\033[K %b[OK]%b %s... 完成\n" "$UI_GREEN" "$UI_NC" "$msg" >&2
     else
-      log_success "$msg 完成"
+      success "$msg 完成"
     fi
   elif [[ "$ret" -eq 124 ]]; then
     if [[ -t 2 ]]; then
-      printf "\r\033[K %b[X]%b %s... 超时 (>${BDTOOL_CMD_TIMEOUT}s, 见 %s)\n" "$UI_RED" "$UI_NC" "$msg" "$BDTOOL_RUN_LOG" >&2
+      printf "\r\033[K %b[XX]%b %s... 超时 (>%ss, 见 %s)\n" "$UI_RED" "$UI_NC" "$msg" "${BDTOOL_CMD_TIMEOUT:-300}" "$BDTOOL_RUN_LOG" >&2
     else
-      log_err "$msg 超时 (>${BDTOOL_CMD_TIMEOUT}s, 请查看 $BDTOOL_RUN_LOG)"
+      error "$msg 超时 (>${BDTOOL_CMD_TIMEOUT:-300}s, 请查看 $BDTOOL_RUN_LOG)"
     fi
   else
     if [[ -t 2 ]]; then
-      printf "\r\033[K %b[X]%b %s... 失败 (请查看 %s)\n" "$UI_RED" "$UI_NC" "$msg" "$BDTOOL_RUN_LOG" >&2
+      printf "\r\033[K %b[XX]%b %s... 失败 (请查看 %s)\n" "$UI_RED" "$UI_NC" "$msg" "$BDTOOL_RUN_LOG" >&2
     else
-      log_err "$msg 失败 (请查看 $BDTOOL_RUN_LOG)"
+      error "$msg 失败 (请查看 $BDTOOL_RUN_LOG)"
     fi
   fi
 
   return "$ret"
+}
+
+_consume_retry_value() {
+  local key="$1"
+  local source_var="PROMPT_INPUTS_${key}"
+  local source_values="${!source_var:-}"
+  local head tail
+
+  [[ -n "$source_values" ]] || return 1
+
+  if [[ "$source_values" == *,* ]]; then
+    head="${source_values%%,*}"
+    tail="${source_values#*,}"
+  else
+    head="$source_values"
+    tail=""
+  fi
+
+  printf -v "$source_var" '%s' "$tail"
+  export "$source_var"
+  _PROMPT_CONSUMED_VALUE="$head"
+  return 0
+}
+
+prompt_secret_with_rules() {
+  local var_name="${1:-}"
+  local prompt="${2:-请输入密码}"
+  local min_len="${3:-12}"
+  local max_retry="${4:-3}"
+  local allow_empty="${5:-0}"
+
+  [[ -n "$var_name" ]] || return 1
+  [[ "$max_retry" =~ ^[0-9]+$ ]] || max_retry=3
+  (( max_retry > 0 )) || max_retry=3
+
+  local retry=1
+  local value=""
+  local queue_key
+  queue_key="$(echo "$var_name" | tr '[:lower:]' '[:upper:]')"
+
+  while (( retry <= max_retry )); do
+    value=""
+
+    if _consume_retry_value "$queue_key" 2>/dev/null; then
+      value="${_PROMPT_CONSUMED_VALUE:-}"
+    elif [[ -n "${!var_name:-}" ]]; then
+      value="${!var_name}"
+    elif [[ "$BDTOOL_NO_PROMPT" == "1" || ! -t 0 ]]; then
+      if [[ "$allow_empty" == "1" ]]; then
+        value=""
+      else
+        value="PTBD$(date +%s%N | tail -c 14)"
+      fi
+      info "无人值守模式：已自动填充 ${var_name}。"
+    else
+      printf "  > %s: " "$prompt" >&2
+      read -r -s value < /dev/tty || true
+      printf "\n" >&2
+    fi
+
+    if [[ "$allow_empty" == "1" && -z "$value" ]]; then
+      printf -v "$var_name" '%s' "$value"
+      export "$var_name"
+      return 0
+    fi
+
+    if [[ ${#value} -lt min_len ]]; then
+      error "安全性不足：密码长度必须 ≥ ${min_len} 位！"
+      hint "请重新输入，建议使用 16 位以上。"
+      retry=$((retry + 1))
+      continue
+    fi
+
+    printf -v "$var_name" '%s' "$value"
+    export "$var_name"
+    return 0
+  done
+
+  die "多次输入失败，已退出。"
+}
+
+prompt_with_default_and_validate() {
+  local var_name="${1:-}"
+  local prompt="${2:-请输入值}"
+  local default="${3:-}"
+  local validator_fn="${4:-validate_nonempty}"
+  local max_retry="${5:-3}"
+
+  [[ -n "$var_name" ]] || return 1
+  [[ "$max_retry" =~ ^[0-9]+$ ]] || max_retry=3
+  (( max_retry > 0 )) || max_retry=3
+
+  local retry=1
+  local value=""
+  local queue_key
+  queue_key="$(echo "$var_name" | tr '[:lower:]' '[:upper:]')"
+
+  while (( retry <= max_retry )); do
+    value=""
+
+    if _consume_retry_value "$queue_key" 2>/dev/null; then
+      value="${_PROMPT_CONSUMED_VALUE:-}"
+    elif [[ -n "${!var_name:-}" ]]; then
+      value="${!var_name}"
+    elif [[ "$BDTOOL_NO_PROMPT" == "1" || ! -t 0 ]]; then
+      value="$default"
+    else
+      read -r -p "  > ${prompt} [默认 ${default}]: " value < /dev/tty || true
+      [[ -n "$value" ]] || value="$default"
+    fi
+
+    if "$validator_fn" "$value"; then
+      printf -v "$var_name" '%s' "$value"
+      export "$var_name"
+      return 0
+    fi
+
+    error "输入校验失败：${prompt}"
+    hint "请按提示修正后重试。"
+    retry=$((retry + 1))
+  done
+
+  die "多次输入失败，已退出。"
 }
 
 die() {
@@ -226,7 +368,7 @@ die() {
   local code="${2:-1}"
 
   ensure_log_dir "${BDTOOL_ROOT:-}"
-  log_err "$message"
-  log_err "详情日志：$BDTOOL_RUN_LOG"
+  error "$message"
+  error "详情日志：$BDTOOL_RUN_LOG"
   exit "$code"
 }
