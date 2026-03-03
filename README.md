@@ -1,120 +1,83 @@
 # PT-BDtool
 
-![Release](https://img.shields.io/github/v/release/My15sir/PT-BDtool)
-![CI](https://github.com/My15sir/PT-BDtool/actions/workflows/ci.yml/badge.svg)
-![Stars](https://img.shields.io/github/stars/My15sir/PT-BDtool?style=social)
+PT-BDtool 是一个面向 PT 发布素材整理的 Bash 工具，提供安装、体检、扫描/生成、清理和日志查看功能。
 
-🇬🇧 [English](README.en.md)
-
-## 中文说明
-
-一个用于自动生成 PT 发布素材的 Bash 工具。
-
-### Quick Start
-
-```bash
-./bdtool.sh install
-./bdtool.sh doctor
-./bdtool.sh /path/to/video_or_BDMV_or_iso
-./bdtool.sh clean
-```
-
-### 输出结构规则
-
-- 所有报告与截图都在：`输出目录/信息/`
-- 截图固定：`1.png~6.png`
-- `bdinfo.txt` 仅 BDMV/ISO 生成
-
-### 功能 Features
-
-- 自动生成 **MediaInfo**
-- 自动生成 **BDInfo（Blu-ray）**
-- 自动截取 **视频截图**
-- 支持 **目录扫描**
-- 支持 **单文件扫描**
-- 支持 **并行处理**
-- 支持 **本地 / SSH 模式（待翻译）**
-
-### 安装 Install
+## 一行安装
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
 ```
 
-克隆仓库：
+说明：安装入口会优先进入交互菜单（默认中文），而不是直接执行安装动作。
 
-```bash
-git clone https://github.com/My15sir/PT-BDtool.git
-cd PT-BDtool
-bash install.sh
-```
+## 安装后主菜单（1-7）
 
-### 使用 Usage
+1. 一键安装
+2. 环境体检
+3. 扫描/生成
+4. 清理
+5. 查看日志
+6. 切换语言
+7. 退出
 
-新入口（推荐，自动输出到 `./bdtool-output`）：
+菜单为循环菜单：任一动作执行后都会回到主菜单，只有选择 `7` 才退出。
 
-```bash
-./bdtool.sh /path/to/videos
-```
+## 扫描二级菜单
 
-兼容旧入口（保持可用）：
+进入 `3) 扫描/生成` 后：
 
-```bash
-./bdtool.sh scan /path/to/videos --out output
-```
+1. 扫描全盘
+2. 扫描指定目录
+3. 后台扫描（可选保留）
+0. 返回
 
-dry 模式（等价 `--no-shots --no-mediainfo`）：
+### 全盘扫描安全提示
 
-```bash
-./bdtool.sh /path/to/videos --mode dry
-```
+选择全盘扫描会先显示风险说明：
+- 高 IO
+- 长时间运行
+- 可能影响系统性能
 
-参数优先级：
-- CLI 参数 > 环境变量（`OPT_*`）> 默认值
+必须输入 `1` 才继续。
 
-### 输出示例 Example
+### 指定目录扫描
 
-```text
-bdtool-output/
-└── 20260303_xxxxxx__scan_xxx
-    └── 20260303_xxxxxx__movie.mkv
-        └── 信息/
-            ├── mediainfo.txt
-            ├── 1.png
-            ├── 2.png
-            ├── 3.png
-            ├── 4.png
-            ├── 5.png
-            └── 6.png
-```
+- 输入扫描路径
+- 自动做路径校验
+- 校验失败会提示并继续重试
 
-### BDInfo 规则
+## 清理机制（安全）
 
-- 仅当输入是 **Blu-ray BDMV/ISO** 时执行 BDInfo。
-- 报告统一归档到 `信息/bdinfo.txt`。
-- 非 BDMV/ISO 输入会跳过 BDInfo（不报错）。
+- 清理仅基于 manifest 白名单：`$DATA_DIR/state/manifest.txt`
+- 默认 `dry-run`（不实际删除）
+- 实际删除前二次确认
+- 只允许删除 `$DATA_DIR` 内的脚本产物，禁止删除用户原有文件
 
-### 依赖 Requirements
+## 数据目录（DATA_DIR）规则
 
-需要安装以下工具：
+优先：
+- `/opt/PT-BDtool/bdtool-output`
 
-- bash
-- ffmpeg
-- ffprobe
-- mediainfo
-- BDInfoCLI-ng（命令名 `BDInfo`，用于 BDMV/ISO）
+否则：
+- `$HOME/.local/share/pt-bdtool/bdtool-output`
 
-#### BDInfoCLI 安装
+兜底：
+- `/tmp/pt-bdtool/bdtool-output`
 
-- Linux x64：运行 `install.sh` 会自动安装 BDInfoCLI-ng 预编译包（`BDInfo-linux-x64.tar.gz`）。
-- 手动安装来源：`tetrahydroc/BDInfoCLI` Releases。
+不会使用 `/usr/local/bin` 作为数据目录。
 
-### 贡献说明
+## 日志位置
 
-- 本项目为 **纯 AI 生成项目（AI Generated Project）**。
-- 目前 **不接受 Issue、Feature Request 或 Pull Request**。
-- 如遇问题，请自行排查或咨询 GPT。
+- 运行日志：`$DATA_DIR/logs/run.log`
+- 交互详情日志：`$DATA_DIR/logs/ui.log`
+- 复测日志：`$DATA_DIR/logs/ux-regression.log`
 
-### 许可证 License
+## 常见问题
 
-MIT License
+### 为什么 curl|bash 后不是直接安装，而是先进入菜单？
+
+这是当前设计：先给出完整 1-7 菜单，用户可以选择“安装/体检/扫描”等动作，避免脚本直接执行重操作。
+
+### 为什么有时看不到彩色菜单？
+
+菜单选项优先使用 256 色米黄色（`38;5;223`），终端不支持时自动回退黄色（`33`）。

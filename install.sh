@@ -120,11 +120,8 @@ if [[ ! -x "$SCRIPT_DIR/bdtool" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  if [[ -t 0 && -t 1 ]]; then
-    # 安装入口：第一步直接展示 1-7 菜单
-    exec "$SCRIPT_DIR/bdtool" --lang zh
-  fi
-  exec "$SCRIPT_DIR/bdtool" install --non-interactive --lang zh
+  # 默认进入主菜单；是否可交互由 bdtool 内部判定（支持 /dev/tty 回退）
+  exec "$SCRIPT_DIR/bdtool" --lang zh
 fi
 
 case "$1" in

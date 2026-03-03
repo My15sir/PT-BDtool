@@ -116,9 +116,40 @@ screen_pause() {
   screen_text "$(t PRESS_ENTER_RETURN)"
   if [[ -t 0 ]]; then
     read -r -p "" _ || true
-  else
+  elif [[ -p /dev/stdin ]]; then
     IFS= read -r _ || true
+  elif [[ -t 1 && -r /dev/tty ]]; then
+    read -r -p "" _ < /dev/tty || true
+  else
+    true
   fi
+}
+
+menu_can_interact() {
+  [[ "${BDTOOL_NO_PROMPT:-0}" != "1" ]] || return 1
+  if [[ -t 0 || -p /dev/stdin ]]; then
+    return 0
+  fi
+  [[ -t 1 && -r /dev/tty ]]
+}
+
+menu_read_line() {
+  local prompt="$1"
+  local __out_var="$2"
+  local line=""
+
+  if [[ -t 0 ]]; then
+    read -r -p "$prompt" line || return 1
+  elif [[ -p /dev/stdin ]]; then
+    IFS= read -r line || return 1
+  elif [[ -t 1 && -r /dev/tty ]]; then
+    read -r -p "$prompt" line < /dev/tty || return 1
+  else
+    return 1
+  fi
+
+  printf -v "$__out_var" '%s' "$line"
+  return 0
 }
 
 run_with_timeout() {
@@ -510,11 +541,7 @@ background_menu() {
     color_menu_option "$(t BG_MENU_0)"
 
     local c
-    if [[ -t 0 ]]; then
-      read -r -p "$(t BG_MENU_PROMPT): " c || return 0
-    else
-      IFS= read -r c || return 0
-    fi
+    menu_read_line "$(t BG_MENU_PROMPT): " c || return 0
 
     case "$c" in
       1)
@@ -736,11 +763,7 @@ menu_scan() {
     color_menu_option "$(t SCAN_MENU_0)"
 
     local ch
-    if [[ -t 0 ]]; then
-      read -r -p "$(t SCAN_MENU_PROMPT): " ch || return 0
-    else
-      IFS= read -r ch || return 0
-    fi
+    menu_read_line "$(t SCAN_MENU_PROMPT): " ch || return 0
 
     case "$ch" in
       1)
@@ -758,9 +781,15 @@ menu_scan() {
         ;;
       2)
         local p
-        p="$(prompt_with_default "$(t SCAN_DIR_PROMPT)" "$PWD")"
-        [[ -n "$p" ]] || p="$PWD"
-        run_action "$(t SCAN_RUNNING)" perform_scan_path "$p"
+        while true; do
+          menu_read_line "$(t SCAN_DIR_PROMPT): " p || { p="$PWD"; }
+          [[ -n "$p" ]] || p="$PWD"
+          if [[ -d "$p" || -f "$p" ]]; then
+            run_action "$(t SCAN_RUNNING)" perform_scan_path "$p"
+            break
+          fi
+          screen_error "$(t ERR_INVALID_PATH)"
+        done
         ;;
       3)
         background_menu
@@ -809,11 +838,7 @@ menu_loop() {
     hr
 
     local choice
-    if [[ -t 0 ]]; then
-      read -r -p "$(t MENU_PROMPT): " choice || { screen_text "$(t MENU_BYE)"; return 0; }
-    else
-      IFS= read -r choice || { screen_text "$(t MENU_BYE)"; return 0; }
-    fi
+    menu_read_line "$(t MENU_PROMPT): " choice || { screen_text "$(t MENU_BYE)"; return 0; }
 
     case "$choice" in
       1) run_action "$(t MENU_1)" perform_install ;;
@@ -893,7 +918,7 @@ main() {
   done
 
   if [[ $# -eq 0 ]]; then
-    if [[ "${BDTOOL_NO_PROMPT:-0}" != "1" && ( -t 0 || -p /dev/stdin ) ]]; then
+    if menu_can_interact; then
       menu_loop
       return 0
     fi

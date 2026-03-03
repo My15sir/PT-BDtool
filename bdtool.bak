@@ -4,8 +4,13 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BDTOOL_ROOT="$ROOT_DIR"
 export BDTOOL_ROOT
+
 : "${BDTOOL_NO_PROMPT:=0}"
 : "${MENU_LOG_TAIL:=80}"
+: "${BDTOOL_CMD_TIMEOUT:=300}"
+: "${PTBD_SCAN_MAX_SECONDS:=300}"
+: "${PTBD_SCAN_XDEV:=1}"
+: "${PTBD_INODE_OPT:=1}"
 
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
@@ -14,6 +19,17 @@ source "$ROOT_DIR/lib/i18n.sh"
 
 ensure_log_dir "$ROOT_DIR"
 setup_log_redirection "$ROOT_DIR"
+
+STATE_DIR="$BDTOOL_DATA_DIR/state"
+TASK_DIR="$STATE_DIR/tasks"
+LOCK_DIR="$STATE_DIR/lock"
+PROGRESS_DB="$STATE_DIR/progress.db"
+MANIFEST_FILE="$STATE_DIR/manifest.txt"
+OUTPUT_DIR="$BDTOOL_DATA_DIR/output"
+REPORT_FILE="$OUTPUT_DIR/REPORT.md"
+
+mkdir -p "$STATE_DIR" "$TASK_DIR" "$OUTPUT_DIR"
+touch "$PROGRESS_DB" "$MANIFEST_FILE" "$REPORT_FILE"
 
 CLI_LANG_OVERRIDE=""
 if [[ $# -gt 0 ]]; then
@@ -33,16 +49,643 @@ if [[ $# -gt 0 ]]; then
     idx=$((idx + 1))
   done
 fi
-
 set_lang "$CLI_LANG_OVERRIDE"
-
-trap 'screen_error "$(t ERR_UNCAUGHT)"; screen_error "$(t LOG_PATH): $BDTOOL_UX_LOG"; ui_log_error "Uncaught error in bdtool main flow."' ERR
 
 APP_VERSION="dev"
 if command -v git >/dev/null 2>&1; then
   APP_VERSION="$(cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo dev)"
 fi
 GITHUB_URL="https://github.com/My15sir/PT-BDtool"
+
+cleanup_lock() {
+  if [[ -n "${BDTOOL_LOCK_OWNED:-}" && "${BDTOOL_LOCK_OWNED}" == "1" ]]; then
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+    BDTOOL_LOCK_OWNED="0"
+  fi
+}
+
+on_signal() {
+  local sig="$1"
+  ui_log_error "signal=$sig pid=$$"
+  cleanup_lock
+  exit 130
+}
+
+on_err() {
+  local rc=$?
+  screen_error "$(t ERR_UNCAUGHT)"
+  screen_error "$(t ERR_LOG_PATH)$BDTOOL_RUN_LOG"
+  ui_log_error "uncaught rc=${rc} line=${BASH_LINENO[0]:-0} cmd=${BASH_COMMAND:-unknown}"
+  cleanup_lock
+  exit "$rc"
+}
+
+trap on_err ERR
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+
+acquire_lock() {
+  mkdir -p "$STATE_DIR"
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" > "$LOCK_DIR/pid"
+    date '+%F %T' > "$LOCK_DIR/started_at"
+    BDTOOL_LOCK_OWNED="1"
+    return 0
+  fi
+  return 1
+}
+
+safe_name() {
+  local v="$1"
+  v="${v//\//_}"
+  v="${v// /_}"
+  v="$(echo "$v" | tr -cd '[:alnum:]_.-')"
+  [[ -n "$v" ]] || v="item"
+  echo "$v"
+}
+
+sha_short() {
+  if command -v sha1sum >/dev/null 2>&1; then
+    echo -n "$1" | sha1sum | awk '{print substr($1,1,8)}'
+  else
+    echo "$(date +%s%N | tail -c 9)"
+  fi
+}
+
+screen_pause() {
+  screen_text "$(t PRESS_ENTER_RETURN)"
+  if [[ -t 0 ]]; then
+    read -r -p "" _ || true
+  else
+    IFS= read -r _ || true
+  fi
+}
+
+run_with_timeout() {
+  local timeout_s="${1:-$BDTOOL_CMD_TIMEOUT}"
+  shift
+  _run_command_with_timeout "$timeout_s" "$@"
+}
+
+run_io_friendly() {
+  local timeout_s="${1:-$BDTOOL_CMD_TIMEOUT}"
+  shift
+
+  local cmd=("$@")
+  if command -v ionice >/dev/null 2>&1; then
+    cmd=(ionice -c2 -n7 "${cmd[@]}")
+  fi
+  if command -v nice >/dev/null 2>&1; then
+    cmd=(nice -n 10 "${cmd[@]}")
+  fi
+
+  run_with_timeout "$timeout_s" "${cmd[@]}"
+}
+
+write_manifest() {
+  local path="$1"
+  echo "$path" >> "$MANIFEST_FILE"
+}
+
+write_report_header() {
+  if [[ ! -s "$REPORT_FILE" ]]; then
+    {
+      echo "# PT-BDtool Scan Report"
+      echo
+      echo "Generated at: $(date '+%F %T')"
+      echo
+    } > "$REPORT_FILE"
+  fi
+}
+
+report_item() {
+  local item="$1"
+  local out="$2"
+  write_report_header
+  {
+    echo "## $(basename "$item")"
+    echo "- Source: $item"
+    echo "- Output: $out"
+    echo "- Time: $(date '+%F %T')"
+    echo
+  } >> "$REPORT_FILE"
+}
+
+ensure_six_png() {
+  local info_dir="$1"
+  local first=""
+  local i
+
+  for i in 1 2 3 4 5 6; do
+    if [[ -f "$info_dir/${i}.png" ]]; then
+      first="$info_dir/${i}.png"
+      break
+    fi
+  done
+
+  for i in 1 2 3 4 5 6; do
+    if [[ ! -f "$info_dir/${i}.png" ]]; then
+      if [[ -n "$first" ]]; then
+        cp -f "$first" "$info_dir/${i}.png" 2>/dev/null || : > "$info_dir/${i}.png"
+      else
+        : > "$info_dir/${i}.png"
+        first="$info_dir/${i}.png"
+      fi
+    fi
+    write_manifest "$info_dir/${i}.png"
+  done
+}
+
+is_video_file() {
+  case "${1,,}" in
+    *.mkv|*.mp4|*.avi|*.mov|*.ts|*.m2ts|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_iso_file() {
+  [[ "${1,,}" == *.iso ]]
+}
+
+is_bdmv_dir() {
+  [[ -d "$1/BDMV" ]]
+}
+
+generate_mediainfo() {
+  local src="$1"
+  local info_dir="$2"
+
+  if command -v mediainfo >/dev/null 2>&1; then
+    run_io_friendly "$BDTOOL_CMD_TIMEOUT" mediainfo "$src" > "$info_dir/mediainfo.txt" 2>&1 || true
+  elif command -v ffprobe >/dev/null 2>&1; then
+    run_io_friendly "$BDTOOL_CMD_TIMEOUT" ffprobe -v error -show_streams -show_format "$src" > "$info_dir/mediainfo.txt" 2>&1 || true
+  else
+    echo "mediainfo/ffprobe unavailable" > "$info_dir/mediainfo.txt"
+  fi
+  write_manifest "$info_dir/mediainfo.txt"
+}
+
+generate_bdinfo() {
+  local src="$1"
+  local info_dir="$2"
+  local target="$src"
+
+  if is_bdmv_dir "$src"; then
+    target="$src/BDMV"
+  fi
+
+  if command -v BDInfo >/dev/null 2>&1; then
+    run_io_friendly "$BDTOOL_CMD_TIMEOUT" BDInfo -w "$target" "$info_dir" > "$info_dir/bdinfo.txt" 2>&1 || true
+  else
+    echo "BDInfo unavailable" > "$info_dir/bdinfo.txt"
+  fi
+  write_manifest "$info_dir/bdinfo.txt"
+}
+
+generate_shots_for_video() {
+  local src="$1"
+  local info_dir="$2"
+
+  if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+    ensure_six_png "$info_dir"
+    return 0
+  fi
+
+  local duration
+  duration="$(run_io_friendly "$BDTOOL_CMD_TIMEOUT" ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
+  local dur_int="${duration%.*}"
+  [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+  (( dur_int < 12 )) && dur_int=12
+
+  local i
+  for i in 1 2 3 4 5 6; do
+    local sec=$(( (dur_int * i) / 7 ))
+    run_io_friendly "$BDTOOL_CMD_TIMEOUT" ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$info_dir/${i}.png" >/dev/null 2>&1 || true
+  done
+
+  ensure_six_png "$info_dir"
+}
+
+process_scan_item() {
+  local item="$1"
+  local safe
+  safe="$(safe_name "$(basename "$item")")_$(sha_short "$item")"
+  local out_dir="$OUTPUT_DIR/$safe"
+  local info_dir="$out_dir/信息"
+
+  mkdir -p "$info_dir"
+  write_manifest "$out_dir"
+  write_manifest "$info_dir"
+
+  if is_iso_file "$item" || is_bdmv_dir "$item"; then
+    generate_bdinfo "$item" "$info_dir"
+    ensure_six_png "$info_dir"
+  elif is_video_file "$item"; then
+    generate_mediainfo "$item" "$info_dir"
+    generate_shots_for_video "$item" "$info_dir"
+  else
+    return 0
+  fi
+
+  report_item "$item" "$out_dir"
+  echo "$item" >> "$PROGRESS_DB"
+}
+
+collect_items_for_scan() {
+  local target="$1"
+  local full="${2:-0}"
+
+  local find_args=()
+  if [[ "$PTBD_SCAN_XDEV" == "1" ]]; then
+    find_args+=( -xdev )
+  fi
+
+  if [[ "$full" == "1" ]]; then
+    find / "${find_args[@]}" \
+      \( -path /proc -o -path /proc/* -o -path /sys -o -path /sys/* -o -path /dev -o -path /dev/* -o -path /run -o -path /run/* -o -path /tmp -o -path /tmp/* \) -prune -o \
+      \( -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.ts" -o -iname "*.m2ts" -o -iname "*.wmv" -o -iname "*.webm" -o -iname "*.mpg" -o -iname "*.mpeg" -o -iname "*.iso" \) -print -o -type d -name "BDMV" -print \) 2>/dev/null
+  else
+    find "$target" "${find_args[@]}" \
+      \( -path "$target/proc" -o -path "$target/proc/*" -o -path "$target/sys" -o -path "$target/sys/*" -o -path "$target/dev" -o -path "$target/dev/*" -o -path "$target/run" -o -path "$target/run/*" -o -path "$target/tmp" -o -path "$target/tmp/*" \) -prune -o \
+      \( -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.ts" -o -iname "*.m2ts" -o -iname "*.wmv" -o -iname "*.webm" -o -iname "*.mpg" -o -iname "*.mpeg" -o -iname "*.iso" \) -print -o -type d -name "BDMV" -print \) 2>/dev/null
+  fi
+}
+
+sort_items() {
+  if [[ "$PTBD_INODE_OPT" == "1" ]]; then
+    awk '!seen[$0]++' | while IFS= read -r p; do
+      local inode
+      inode="$(stat -c '%i' "$p" 2>/dev/null || echo 0)"
+      printf "%s\t%s\n" "$inode" "$p"
+    done | sort -n | cut -f2-
+  else
+    awk '!seen[$0]++'
+  fi
+}
+
+show_progress() {
+  local done="$1"
+  local total="$2"
+  local width=28
+  local fill=$(( done * width / total ))
+  local empty=$(( width - fill ))
+  local p1 p2
+  p1="$(printf '%*s' "$fill" | tr ' ' '#')"
+  p2="$(printf '%*s' "$empty" | tr ' ' '.')"
+  printf "\r[%s%s] %d/%d" "$p1" "$p2" "$done" "$total" >&2
+}
+
+run_scan_core() {
+  local target="$1"
+  local full="$2"
+  local resume_mode="${3:-0}"
+
+  [[ "$full" == "1" || -d "$target" || -f "$target" ]] || {
+    screen_error "$(t ERR_INVALID_PATH)"
+    return 1
+  }
+
+  if [[ "$full" != "1" && -f "$target" ]]; then
+    if ! is_video_file "$target" && ! is_iso_file "$target"; then
+      screen_error "$(t ERR_INVALID_PATH)"
+      return 1
+    fi
+  fi
+
+  local items=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && items+=("$line")
+  done < <(collect_items_for_scan "$target" "$full" | sort_items)
+
+  local total="${#items[@]}"
+  ui_log_info "scan target=$target full=$full total=$total resume=$resume_mode"
+
+  if (( total == 0 )); then
+    ui_log_warn "scan no matched items target=$target"
+    screen_error "$(t ACTION_FAIL)$BDTOOL_UX_LOG"
+    return 0
+  fi
+
+  local processed=0
+  declare -A done_map=()
+
+  if [[ "$resume_mode" == "1" && -f "$PROGRESS_DB" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && done_map["$line"]=1
+    done < "$PROGRESS_DB"
+  fi
+
+  local started
+  started="$(date +%s)"
+  local item
+  for item in "${items[@]}"; do
+    if [[ "$resume_mode" == "1" && -n "${done_map[$item]:-}" ]]; then
+      processed=$((processed + 1))
+      continue
+    fi
+
+    process_scan_item "$item"
+    processed=$((processed + 1))
+
+    if [[ -t 1 ]]; then
+      show_progress "$processed" "$total"
+    fi
+
+    local now
+    now="$(date +%s)"
+    if (( now - started >= PTBD_SCAN_MAX_SECONDS )); then
+      ui_log_warn "scan timeout max=${PTBD_SCAN_MAX_SECONDS}s"
+      screen_error "$(t ACTION_FAIL)${BDTOOL_UX_LOG}"
+      [[ -t 1 ]] && printf "\n" >&2
+      return 1
+    fi
+  done
+
+  [[ -t 1 ]] && printf "\n" >&2
+  return 0
+}
+
+write_task_json() {
+  local id="$1"
+  local status="$2"
+  local pid="$3"
+  local mode="$4"
+  local target="$5"
+  local resumed="$6"
+  local file="$TASK_DIR/${id}.json"
+
+  cat > "$file" <<JSON
+{
+  "task_id": "$id",
+  "status": "$status",
+  "pid": "$pid",
+  "mode": "$mode",
+  "target": "${target//"/}",
+  "resumed": "$resumed",
+  "updated_at": "$(date '+%F %T')"
+}
+JSON
+}
+
+list_tasks() {
+  local f
+  shopt -s nullglob
+  for f in "$TASK_DIR"/*.json; do
+    local id status pid mode target
+    id="$(grep -o '"task_id": *"[^"]*"' "$f" | head -n1 | cut -d'"' -f4)"
+    status="$(grep -o '"status": *"[^"]*"' "$f" | head -n1 | cut -d'"' -f4)"
+    pid="$(grep -o '"pid": *"[^"]*"' "$f" | head -n1 | cut -d'"' -f4)"
+    mode="$(grep -o '"mode": *"[^"]*"' "$f" | head -n1 | cut -d'"' -f4)"
+    target="$(grep -o '"target": *"[^"]*"' "$f" | head -n1 | cut -d'"' -f4)"
+    screen_text "${id} | ${status} | pid=${pid} | ${mode} | ${target}"
+  done
+  shopt -u nullglob
+}
+
+start_background_task() {
+  local target="$1"
+  local full="$2"
+  local resume_mode="${3:-0}"
+
+  if ! acquire_lock; then
+    screen_error "$(t ERR_LOCKED)"
+    return 1
+  fi
+  cleanup_lock
+
+  local task_id
+  task_id="task_$(date +%Y%m%d_%H%M%S)_$RANDOM"
+  local mode="specific"
+  [[ "$full" == "1" ]] && mode="full"
+
+  nohup env LANG_CODE="$LANG_CODE" BDTOOL_NO_PROMPT=1 "$ROOT_DIR/bdtool" __scan_worker --target "$target" --full "$full" --resume "$resume_mode" --task-id "$task_id" >> "$BDTOOL_RUN_LOG" 2>&1 &
+  local pid=$!
+
+  write_task_json "$task_id" "running" "$pid" "$mode" "$target" "$resume_mode"
+  screen_success "$(t BG_STARTED)"
+  screen_text "$(t BG_TASK_ID): $task_id"
+  screen_pause
+}
+
+stop_task() {
+  local task_id="$(prompt_with_default "$(t BG_TASK_ID)" "")"
+  [[ -n "$task_id" ]] || return 0
+  local file="$TASK_DIR/${task_id}.json"
+  [[ -f "$file" ]] || { screen_error "$(t MENU_INVALID)"; return 1; }
+
+  local pid
+  pid="$(grep -o '"pid": *"[^"]*"' "$file" | head -n1 | cut -d'"' -f4)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    write_task_json "$task_id" "stopped" "$pid" "manual" "unknown" "0"
+  fi
+  screen_success "$(t ACTION_DONE)"
+  screen_pause
+}
+
+resume_task() {
+  local task_id="$(prompt_with_default "$(t BG_TASK_ID)" "")"
+  [[ -n "$task_id" ]] || return 0
+  local file="$TASK_DIR/${task_id}.json"
+  [[ -f "$file" ]] || { screen_error "$(t MENU_INVALID)"; return 1; }
+
+  local target mode
+  target="$(grep -o '"target": *"[^"]*"' "$file" | head -n1 | cut -d'"' -f4)"
+  mode="$(grep -o '"mode": *"[^"]*"' "$file" | head -n1 | cut -d'"' -f4)"
+
+  if [[ "$mode" == "full" ]]; then
+    start_background_task "/" "1" "1"
+  else
+    start_background_task "$target" "0" "1"
+  fi
+}
+
+background_menu() {
+  while true; do
+    section "$(t MENU_3)"
+    color_menu_option "$(t BG_MENU_1)"
+    color_menu_option "$(t BG_MENU_2)"
+    color_menu_option "$(t BG_MENU_3)"
+    color_menu_option "$(t BG_MENU_4)"
+    color_menu_option "$(t BG_MENU_0)"
+
+    local c
+    if [[ -t 0 ]]; then
+      read -r -p "$(t BG_MENU_PROMPT): " c || return 0
+    else
+      IFS= read -r c || return 0
+    fi
+
+    case "$c" in
+      1)
+        local d="$(prompt_with_default "$(t SCAN_DIR_PROMPT)" "$PWD")"
+        [[ -n "$d" ]] || d="$PWD"
+        if [[ -d "$d" || -f "$d" ]]; then
+          start_background_task "$d" "0" "0"
+        else
+          screen_error "$(t ERR_INVALID_PATH)"
+          screen_pause
+        fi
+        ;;
+      2)
+        list_tasks
+        screen_pause
+        ;;
+      3)
+        stop_task
+        ;;
+      4)
+        resume_task
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        screen_error "$(t MENU_INVALID)"
+        ;;
+    esac
+  done
+}
+
+run_action() {
+  local label="$1"
+  shift
+
+  if ! acquire_lock; then
+    screen_error "$(t ERR_LOCKED)"
+    screen_pause
+    return 0
+  fi
+
+  section "$label"
+  ui_log_info "action=${label} cmd=$*"
+
+  local rc=0
+  local old_err_trap
+  old_err_trap="$(trap -p ERR || true)"
+  trap - ERR
+  set +e
+  "$@" >> "$BDTOOL_UX_LOG" 2>&1
+  rc=$?
+  set -e
+  if [[ -n "$old_err_trap" ]]; then
+    eval "$old_err_trap"
+  fi
+
+  cleanup_lock
+
+  if [[ "$rc" -eq 0 ]]; then
+    screen_success "${label} $(t ACTION_DONE)"
+  else
+    screen_error "${label} $(t ACTION_FAIL)$BDTOOL_UX_LOG"
+  fi
+  screen_pause
+  return 0
+}
+
+perform_install() {
+  local install_root="/opt/PT-BDtool"
+  local target_root=""
+
+  if [[ -w "/opt" || "${EUID:-$(id -u)}" -eq 0 ]]; then
+    target_root="$install_root"
+  else
+    target_root="$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+  fi
+
+  mkdir -p "$target_root"
+  cp -a "$ROOT_DIR/bdtool" "$target_root/bdtool"
+  cp -a "$ROOT_DIR/bdtool.sh" "$target_root/bdtool.sh"
+  cp -a "$ROOT_DIR/install.sh" "$target_root/install.sh"
+  mkdir -p "$target_root/lib"
+  cp -a "$ROOT_DIR/lib/"* "$target_root/lib/"
+
+  chmod +x "$target_root/bdtool" "$target_root/install.sh" "$target_root/bdtool.sh"
+
+  local linked=0
+  if [[ -w "/usr/local/bin" || "${EUID:-$(id -u)}" -eq 0 ]]; then
+    ln -sf "$target_root/bdtool" /usr/local/bin/bdtool
+    linked=1
+  else
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$target_root/bdtool" "$HOME/.local/bin/bdtool"
+    linked=1
+  fi
+
+  if [[ "$linked" -eq 1 ]]; then
+    screen_success "$(t INSTALL_DONE)"
+    screen_text "$(t INSTALL_NEXT)"
+  fi
+}
+
+perform_doctor() {
+  local cmds=(bash find awk sed sort timeout)
+  local miss=0
+  local c
+  for c in "${cmds[@]}"; do
+    if ! command -v "$c" >/dev/null 2>&1; then
+      ui_log_warn "missing command: $c"
+      miss=1
+    fi
+  done
+
+  if [[ "$miss" -eq 0 ]]; then
+    screen_success "$(t DOCTOR_DONE)"
+  else
+    screen_error "$(t ACTION_FAIL)$BDTOOL_UX_LOG"
+    return 1
+  fi
+}
+
+perform_scan_full() {
+  run_scan_core "/" "1" "0"
+}
+
+perform_scan_path() {
+  local path="$1"
+  run_scan_core "$path" "0" "0"
+}
+
+perform_clean() {
+  local apply="${1:-0}"
+  local f
+  local count=0
+  local del=0
+
+  [[ -f "$MANIFEST_FILE" ]] || { screen_success "$(t CLEAN_DRYRUN_DONE)"; return 0; }
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    count=$((count + 1))
+
+    local abs
+    abs="$(readlink -f "$f" 2>/dev/null || true)"
+    [[ -n "$abs" ]] || continue
+
+    case "$abs" in
+      "$BDTOOL_DATA_DIR"/*)
+        if [[ "$apply" == "1" ]]; then
+          if [[ -d "$abs" ]]; then
+            rm -rf "$abs" 2>/dev/null || true
+          else
+            rm -f "$abs" 2>/dev/null || true
+          fi
+          del=$((del + 1))
+        fi
+        ;;
+      *)
+        ui_log_warn "skip unsafe manifest path: $abs"
+        ;;
+    esac
+  done < "$MANIFEST_FILE"
+
+  if [[ "$apply" == "1" ]]; then
+    : > "$MANIFEST_FILE"
+    ui_log_info "clean apply deleted=$del scanned=$count"
+  else
+    ui_log_info "clean dryrun candidate=$count"
+  fi
+}
 
 show_banner() {
   section "PT-BDtool"
@@ -63,257 +706,93 @@ show_help() {
   echo "$(t HELP_TITLE):"
   echo "  bdtool [--lang zh|en]"
   echo "  bdtool --help [--lang zh|en]"
-  echo "  bdtool install [--non-interactive] [--lang zh|en]"
+  echo "  bdtool install [--lang zh|en] [--non-interactive]"
   echo "  bdtool doctor [--lang zh|en]"
-  echo "  bdtool scan [path] [--lang zh|en] [extra scan args]"
-  echo "  bdtool clean [--yes] [--lang zh|en]"
+  echo "  bdtool scan [--full|PATH] [--resume] [--lang zh|en]"
+  echo "  bdtool clean [--apply] [--yes] [--lang zh|en]"
   echo "  bdtool logs [--tail N] [--lang zh|en]"
+  echo "  bdtool tasks [--lang zh|en]"
   echo
   echo "$(t HELP_DESC)"
   echo "$(t HELP_NONTTY_POLICY)"
-  echo
-  echo "$(t HELP_COMMANDS):"
-  echo "  install"
-  echo "  doctor"
-  echo "  scan"
-  echo "  clean"
-  echo "  logs"
-  echo
-  echo "Options:"
-  echo "  --lang zh|en         $(t HELP_OPT_LANG)"
-  echo "  --non-interactive    $(t HELP_OPT_NONINT)"
-  echo "  --yes                $(t HELP_OPT_YES)"
-  echo "  --tail N             $(t HELP_OPT_TAIL)"
-}
-
-die_with_hint() {
-  screen_error "$1"
-  screen_text "$(t HINT_USE_HELP)"
-  die "$(t LOG_PATH): $BDTOOL_RUN_LOG"
-}
-
-cmd_install() {
-  local non_interactive=0
-  local args=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --non-interactive)
-        non_interactive=1
-        shift
-        ;;
-      --lang|--lang=*)
-        if [[ "$1" == "--lang" ]]; then
-          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
-          set_lang "$2"
-          shift 2
-        else
-          set_lang "${1#*=}"
-          shift
-        fi
-        ;;
-      *)
-        args+=("$1")
-        shift
-        ;;
-    esac
-  done
-
-  if [[ "$non_interactive" -eq 1 ]]; then
-    export BDTOOL_NO_PROMPT=1
-  fi
-  execute_with_spinner "$(t INSTALL_RUNNING)" "$ROOT_DIR/install.sh" "${args[@]}" || die "$(t INSTALL_RUNNING) failed"
-}
-
-cmd_doctor() {
-  execute_with_spinner "$(t DOCTOR_RUNNING)" "$ROOT_DIR/bdtool.sh" doctor || die "$(t DOCTOR_RUNNING) failed"
-}
-
-cmd_scan() {
-  local scan_path="${1:-.}"
-  shift || true
-  execute_with_spinner "$(t SCAN_RUNNING)" "$ROOT_DIR/bdtool.sh" scan "$scan_path" "$@" || die "$(t SCAN_RUNNING) failed"
-}
-
-cmd_clean() {
-  local yes=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --yes) yes=1; shift ;;
-      *) shift ;;
-    esac
-  done
-
-  if [[ "$yes" -ne 1 ]]; then
-    if [[ "${BDTOOL_NO_PROMPT:-0}" == "1" || ! -t 1 ]]; then
-      die "$(t ERR_NONINT_NEED_YES)"
-    fi
-    confirm "$(t CONFIRM_CLEAN_1)" "N" || return 0
-    confirm "$(t CONFIRM_CLEAN_2)" "N" || return 0
-  fi
-  execute_with_spinner "$(t CLEAN_RUNNING)" "$ROOT_DIR/bdtool.sh" clean || die "$(t CLEAN_RUNNING) failed"
-}
-
-cmd_logs() {
-  local tail_n="${1:-$MENU_LOG_TAIL}"
-  validate_int_range "$tail_n" 1 10000 || die_with_hint "$(t ERR_LOG_TAIL_INT)"
-  section "$(t LOGS_RUNNING)"
-  tail -n "$tail_n" "$BDTOOL_RUN_LOG"
 }
 
 switch_language() {
   if [[ "$LANG_CODE" == "zh" ]]; then
     set_lang "en"
-    screen_success "$(t MENU_SWITCHED_EN)"
+    screen_success "$(t LANG_SWITCH_EN)"
   else
     set_lang "zh"
-    screen_success "$(t MENU_SWITCHED_ZH)"
+    screen_success "$(t LANG_SWITCH_ZH)"
   fi
 }
 
-has_scan_capability() {
-  [[ -x "$ROOT_DIR/bdtool.sh" ]] || return 1
-  grep -qE '^[[:space:]]*scan\)' "$ROOT_DIR/bdtool.sh" 2>/dev/null
-}
-
-menu_pause() {
-  screen_text "$(t PRESS_ENTER_RETURN)"
-  if [[ -t 0 ]]; then
-    read -r -p "" _ || true
-  else
-    IFS= read -r _ || true
-  fi
-}
-
-run_action() {
-  local label_key="$1"
-  shift
-
-  local label
-  label="$(t "$label_key")"
-
-  section "$label"
-  ui_log_info "[ACTION] ${label} | cmd: $*"
-
-  local rc=0
-  local old_err_trap
-  old_err_trap="$(trap -p ERR || true)"
-
-  trap - ERR
-  set +e
-  _run_command_with_timeout "${BDTOOL_CMD_TIMEOUT:-300}" "$@" >> "$BDTOOL_UX_LOG" 2>&1
-  rc=$?
-  set -e
-  if [[ -n "$old_err_trap" ]]; then
-    eval "$old_err_trap"
-  fi
-
-  ui_log_info "[ACTION-END] ${label} | rc=${rc}"
-
-  if [[ "$rc" -eq 0 ]]; then
-    screen_success "$(t ACTION_SUCCESS_PREFIX)${label}$(t ACTION_DONE_SUFFIX)"
-  else
-    screen_error "$(t ACTION_FAIL_PREFIX)${label}$(t ACTION_FAIL_SUFFIX)${BDTOOL_UX_LOG}"
-  fi
-
-  menu_pause
-  return 0
-}
-
-run_logs_action() {
-  section "$(t LOGS_RUNNING)"
-  ui_log_info "[ACTION] $(t LOGS_RUNNING) | tail=${MENU_LOG_TAIL:-80} | run_log=${BDTOOL_RUN_LOG}"
-  if validate_int_range "${MENU_LOG_TAIL:-80}" 1 10000 && [[ -f "$BDTOOL_RUN_LOG" ]]; then
-    tail -n "${MENU_LOG_TAIL:-80}" "$BDTOOL_RUN_LOG" >> "$BDTOOL_UX_LOG" 2>&1
-    screen_success "$(t ACTION_SUCCESS_PREFIX)$(t LOGS_RUNNING)$(t ACTION_DONE_SUFFIX)"
-    screen_text "$(t LOGS_CAPTURED)"
-  else
-    screen_error "$(t ACTION_FAIL_PREFIX)$(t LOGS_RUNNING)$(t ACTION_FAIL_SUFFIX)${BDTOOL_UX_LOG}"
-  fi
-  menu_pause
-}
-
-build_scan_dir_candidates() {
-  local dirs=()
-  local item
-
-  if [[ -n "${PTBD_SCAN_DIRS:-}" ]]; then
-    IFS=':' read -r -a _env_dirs <<< "$PTBD_SCAN_DIRS"
-    for item in "${_env_dirs[@]}"; do
-      [[ -n "$item" ]] && dirs+=("$item")
-    done
-  fi
-
-  dirs+=(
-    "/opt/PT-BDtool"
-    "/opt/PT-BDtool/bdtool-output"
-    "$HOME"
-    "$PWD"
-    "$ROOT_DIR"
-  )
-
-  if [[ -n "${BDTOOL_DATA_DIR:-}" ]]; then
-    dirs+=("$BDTOOL_DATA_DIR")
-  fi
-
-  local uniq=()
-  declare -A seen=()
-  for item in "${dirs[@]}"; do
-    [[ -n "$item" ]] || continue
-    if [[ -d "$item" && -r "$item" ]]; then
-      if [[ -z "${seen[$item]:-}" ]]; then
-        seen[$item]=1
-        uniq+=("$item")
-      fi
-    fi
-  done
-
-  printf '%s\n' "${uniq[@]}"
-}
-
-scan_menu() {
-  section "$(t SCAN_MENU_TITLE)"
-
-  local dirs=()
-  local line
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && dirs+=("$line")
-  done < <(build_scan_dir_candidates)
-
-  if [[ "${#dirs[@]}" -eq 0 ]]; then
-    screen_warn "$(t SCAN_MENU_NO_DIR)"
-    menu_pause
-    return 1
-  fi
-
-  local idx=1
-  color_menu_option "$(t SCAN_MENU_BACK)"
-  for line in "${dirs[@]}"; do
-    color_menu_option "${idx}) ${line}"
-    idx=$((idx + 1))
-  done
-
-  local choice
+menu_scan() {
   while true; do
+    section "$(t SCAN_MENU_TITLE)"
+    color_menu_option "$(t SCAN_MENU_1)"
+    color_menu_option "$(t SCAN_MENU_2)"
+    color_menu_option "$(t SCAN_MENU_3)"
+    color_menu_option "$(t SCAN_MENU_0)"
+
+    local ch
     if [[ -t 0 ]]; then
-      read -r -p "$(t SCAN_MENU_PROMPT): " choice || return 1
+      read -r -p "$(t SCAN_MENU_PROMPT): " ch || return 0
     else
-      IFS= read -r choice || return 1
+      IFS= read -r ch || return 0
     fi
 
-    if [[ "$choice" == "0" ]]; then
-      return 1
-    fi
-
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#dirs[@]} )); then
-      local selected="${dirs[$((choice - 1))]}"
-      ui_log_info "Selected scan directory: $selected"
-      screen_text "$(t SCAN_MENU_SELECTED)${selected}"
-      run_action SCAN_RUNNING "$ROOT_DIR/bdtool.sh" scan "$selected" --mode dry
-      return 0
-    fi
-
-    screen_error "$(t SCAN_MENU_INVALID)"
+    case "$ch" in
+      1)
+        screen_text "$(t SCAN_RISK_1)"
+        screen_text "$(t SCAN_RISK_2)"
+        screen_text "$(t SCAN_RISK_3)"
+        local c
+        if [[ -t 0 ]]; then
+          read -r -p "$(t SCAN_RISK_CONFIRM): " c || c="0"
+        else
+          IFS= read -r c || c="0"
+        fi
+        [[ "$c" == "1" ]] || continue
+        run_action "$(t SCAN_RUNNING)" perform_scan_full
+        ;;
+      2)
+        local p
+        p="$(prompt_with_default "$(t SCAN_DIR_PROMPT)" "$PWD")"
+        [[ -n "$p" ]] || p="$PWD"
+        run_action "$(t SCAN_RUNNING)" perform_scan_path "$p"
+        ;;
+      3)
+        background_menu
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        screen_error "$(t MENU_INVALID)"
+        ;;
+    esac
   done
+}
+
+menu_clean() {
+  run_action "$(t MENU_4)" perform_clean 0
+
+  if [[ "${BDTOOL_NO_PROMPT:-0}" == "1" || ! -t 0 ]]; then
+    return 0
+  fi
+
+  if confirm "$(t CLEAN_CONFIRM_1)" "N" && confirm "$(t CLEAN_CONFIRM_2)" "N"; then
+    run_action "$(t MENU_4)" perform_clean 1
+  fi
+}
+
+menu_logs() {
+  section "$(t MENU_5)"
+  tail -n "${MENU_LOG_TAIL:-80}" "$BDTOOL_RUN_LOG" >> "$BDTOOL_UX_LOG" 2>&1 || true
+  screen_success "$(t MENU_5) $(t ACTION_DONE)"
+  screen_text "$(t ERR_LOG_PATH)$BDTOOL_UX_LOG"
+  screen_pause
 }
 
 menu_loop() {
@@ -331,36 +810,17 @@ menu_loop() {
 
     local choice
     if [[ -t 0 ]]; then
-      if ! read -r -p "$(t MENU_PROMPT): " choice; then
-        screen_text "$(t MENU_BYE)"
-        return 0
-      fi
+      read -r -p "$(t MENU_PROMPT): " choice || { screen_text "$(t MENU_BYE)"; return 0; }
     else
-      if ! IFS= read -r choice; then
-        screen_text "$(t MENU_BYE)"
-        return 0
-      fi
+      IFS= read -r choice || { screen_text "$(t MENU_BYE)"; return 0; }
     fi
 
     case "$choice" in
-      1) run_action INSTALL_RUNNING "$ROOT_DIR/install.sh" --non-interactive --lang "$LANG_CODE" ;;
-      2) run_action DOCTOR_RUNNING "$ROOT_DIR/bdtool.sh" doctor ;;
-      3)
-        if has_scan_capability; then
-          scan_menu || true
-        else
-          screen_warn "$(t MENU_SCAN_NA)"
-          menu_pause
-        fi
-        ;;
-      4)
-        if confirm "$(t CONFIRM_CLEAN_1)" "N" && confirm "$(t CONFIRM_CLEAN_2)" "N"; then
-          run_action CLEAN_RUNNING "$ROOT_DIR/bdtool.sh" clean
-        else
-          menu_pause
-        fi
-        ;;
-      5) run_logs_action ;;
+      1) run_action "$(t MENU_1)" perform_install ;;
+      2) run_action "$(t MENU_2)" perform_doctor ;;
+      3) menu_scan ;;
+      4) menu_clean ;;
+      5) menu_logs ;;
       6) switch_language ;;
       7|q|Q)
         screen_text "$(t MENU_BYE)"
@@ -373,11 +833,48 @@ menu_loop() {
   done
 }
 
+scan_worker_main() {
+  local target="."
+  local full="0"
+  local resume_mode="0"
+  local task_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target) target="$2"; shift 2 ;;
+      --full) full="$2"; shift 2 ;;
+      --resume) resume_mode="$2"; shift 2 ;;
+      --task-id) task_id="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  [[ -n "$task_id" ]] || task_id="task_$(date +%Y%m%d_%H%M%S)_$RANDOM"
+
+  if ! acquire_lock; then
+    write_task_json "$task_id" "locked" "0" "worker" "$target" "$resume_mode"
+    exit 1
+  fi
+
+  if run_scan_core "$target" "$full" "$resume_mode"; then
+    write_task_json "$task_id" "done" "$$" "worker" "$target" "$resume_mode"
+  else
+    write_task_json "$task_id" "failed" "$$" "worker" "$target" "$resume_mode"
+  fi
+  cleanup_lock
+}
+
 main() {
+  if [[ "${1:-}" == "__scan_worker" ]]; then
+    shift
+    scan_worker_main "$@"
+    return 0
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --lang)
-        [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+        [[ $# -ge 2 ]] || { screen_error "$(t ERR_NEED_VALUE)"; return 1; }
         set_lang "$2"
         shift 2
         ;;
@@ -400,7 +897,6 @@ main() {
       menu_loop
       return 0
     fi
-    screen_text "$(t MSG_NONTTY_HELP)"
     show_help
     return 0
   fi
@@ -413,29 +909,58 @@ main() {
       show_help
       ;;
     install)
-      cmd_install "$@"
+      run_action "$(t MENU_1)" perform_install
       ;;
     doctor)
-      cmd_doctor "$@"
+      run_action "$(t MENU_2)" perform_doctor
       ;;
     scan)
-      cmd_scan "$@"
+      local mode_full=0
+      local resume_mode=0
+      local target="."
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --full) mode_full=1; target="/"; shift ;;
+          --resume) resume_mode=1; shift ;;
+          *) target="$1"; shift ;;
+        esac
+      done
+      run_action "$(t MENU_3)" run_scan_core "$target" "$mode_full" "$resume_mode"
       ;;
     clean)
-      cmd_clean "$@"
+      local apply=0
+      local yes=0
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --apply) apply=1; shift ;;
+          --yes) yes=1; shift ;;
+          *) shift ;;
+        esac
+      done
+      if [[ "$apply" == "1" && "$yes" != "1" && "${BDTOOL_NO_PROMPT:-0}" != "1" && -t 0 ]]; then
+        if ! (confirm "$(t CLEAN_CONFIRM_1)" "N" && confirm "$(t CLEAN_CONFIRM_2)" "N"); then
+          return 0
+        fi
+      fi
+      run_action "$(t MENU_4)" perform_clean "$apply"
       ;;
     logs)
+      local tail_n="${MENU_LOG_TAIL:-80}"
       if [[ "${1:-}" == "--tail" ]]; then
         shift
-        cmd_logs "${1:-$MENU_LOG_TAIL}"
+        tail_n="${1:-$tail_n}"
       elif [[ "${1:-}" == --tail=* ]]; then
-        cmd_logs "${1#*=}"
-      else
-        cmd_logs "$MENU_LOG_TAIL"
+        tail_n="${1#*=}"
       fi
+      tail -n "$tail_n" "$BDTOOL_RUN_LOG"
+      ;;
+    tasks)
+      list_tasks
       ;;
     *)
-      die_with_hint "unknown command: $cmd"
+      screen_error "$(t MENU_INVALID)"
+      screen_error "$(t ERR_LOG_PATH)$BDTOOL_RUN_LOG"
+      return 1
       ;;
   esac
 }

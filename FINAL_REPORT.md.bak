@@ -1,94 +1,110 @@
 # FINAL_REPORT
 
-## 修复概览
+## 本次重构目标达成
 
-本次按最新验收要求重构了交互控制台：
-- 新增扫描/生成子菜单（目录数字选择）
-- 默认中文（仅显式 `--lang en` 或 `LANG_CODE=en` 时进入英文）
-- 严格单语渲染（菜单/提示/成功失败文案均按当前语言输出）
-- 默认隐藏 `[INFO]/[WARN]` 前缀，详细信息写入 `ui.log`
-- 菜单选项强制米黄色渲染（256 色优先，自动 fallback）
-- 失败不退出菜单，日志路径统一走 `DATA_DIR`
+- `bash <(curl -fsSL .../install.sh)` 入口改为“优先进入 1-7 主菜单”（交互终端下）
+- 默认中文，严格单语
+- 增加系统级稳定机制：全局 trap、互斥锁、超时、资源保护、DATA_DIR 约束
+- 扫描系统升级：全盘/指定/后台、任务状态、停止、恢复、断点续扫、进度显示
+- 清理系统升级：manifest 白名单删除、路径边界校验、默认 dry-run
 
-## 关键实现
+## 关键架构实现
 
-### 1) 选项 3 子菜单（扫描目录选择）
-- 新增 `scan_menu()`：先列目录，再数字选择，再执行 scan。
-- 目录来源优先级：
-  1. `PTBD_SCAN_DIRS`（冒号分隔）
-  2. 默认候选：
-     - `/opt/PT-BDtool`
-     - `/opt/PT-BDtool/bdtool-output`
-     - `$HOME`
-     - 当前目录 `$PWD`
-     - 仓库目录 `$ROOT_DIR`
-     - `BDTOOL_DATA_DIR`（若已解析）
-- 仅展示存在且可读目录，去重。
-- 支持 `0` 返回上一级。
-- 选择后执行：`bdtool.sh scan <选定目录> --mode dry`。
-- 失败仅一句提示并回主菜单，不退出 shell。
+### 1) 安装入口即菜单
+- `install.sh` 在交互终端且无参数时直接 `exec ./bdtool --lang zh`。
+- 非交互时默认走 `bdtool install --non-interactive --lang zh`。
+- 自举模式（curl|bash 无仓库文件）保留：自动拉取完整仓库后继续执行。
 
-### 2) 默认中文 + 严格单语
-- `lib/i18n.sh` 中 `LANG_CODE` 默认 `zh`。
-- `set_lang` 策略：
-  - 优先 CLI `--lang`
-  - 其次显式环境变量 `LANG_CODE/BDTOOL_LANG`
-  - 否则固定 `zh`
-- 不再依据系统 `LANG/LC_ALL` 自动切语言。
-- 全部菜单与交互文案通过 `t(KEY)` 输出，按当前语言单语显示。
+### 2) 全局安全机制
+- 全局 trap：`ERR/INT/TERM` 均写入日志。
+- 互斥锁：`$DATA_DIR/state/lock`，防止并发任务。
+- 外部命令统一通过 `timeout`（默认 300 秒）。
+- 扫描最大时长：`PTBD_SCAN_MAX_SECONDS`（默认 300 秒）。
+- 资源保护：扫描执行使用 `nice` + `ionice`（可用时自动启用）。
 
-### 3) 屏幕最小输出（隐藏 INFO 刷屏）
-- `lib/ui.sh` 增加两套接口：
-  - 屏幕层：`screen_text/screen_success/screen_warn/screen_error`（无 `[INFO]` 前缀）
-  - 交互日志层：`ui_log_info/ui_log_warn/ui_log_error`（写 `UI_LOG`，带时间戳）
-- 菜单动作统一使用 `run_action()`：
-  - 详细命令输出重定向到 `UI_LOG`
-  - 屏幕仅显示一行结果 + “按回车返回菜单”
+### 3) 生产级扫描系统
+- 扫描二级菜单：
+  1. 扫描全盘
+  2. 扫描指定目录
+  3. 后台扫描
+  0. 返回
+- 全盘扫描含三条风险提示，要求输入 `1` 才继续。
+- 后台扫描支持：
+  - 启动后台任务
+  - 查看任务状态
+  - 停止任务
+  - 恢复扫描
+- 任务状态文件：`$DATA_DIR/state/tasks/<task_id>.json`
+- 断点续扫：`$DATA_DIR/state/progress.db`
+- TTY 下显示计数进度条；非 TTY 仅写日志。
 
-### 4) 菜单米黄色与兼容 fallback
-- 在 `lib/ui.sh` 里实现能力检测：
-  - `tput colors >= 256`：`MENU_OPT_COLOR='\033[38;5;223m'`
-  - 否则 fallback：`\033[33m`
-- 菜单选项行统一用 `color_menu_option` 包裹，并在行尾 `RESET`。
-- 未对全局文本做绿色覆盖，绿色仅用于成功提示。
+### 4) 大盘优化与识别规则
+- 扫描排除：`/proc /sys /dev /run /tmp`
+- 默认 `find -xdev`（可通过 `PTBD_SCAN_XDEV=0` 关闭）
+- inode 优化排序（可通过 `PTBD_INODE_OPT=0` 关闭）
+- 识别规则：
+  - 普通视频：`mkv/mp4/avi/mov/ts/m2ts/wmv/webm/mpg/mpeg`
+  - 原盘：`BDMV` 目录、`.iso`
 
-### 5) 失败不退出菜单 + 数据目录路径修复
-- 主循环 `while true` 仅在 Quit 退出。
-- 子动作失败只影响当前动作提示，不影响菜单循环。
-- 日志目录统一由 `resolve_data_dir()` 计算：
-  - `/opt/PT-BDtool/bdtool-output`（可写或 root）
-  - 否则 `$HOME/.local/share/pt-bdtool/bdtool-output`
-  - 再兜底 `/tmp/pt-bdtool/bdtool-output`
-- 不再出现 `/usr/local/bin/bdtool-output`。
+### 5) 输出归档规范
+- 每条扫描条目写入：`$DATA_DIR/output/<安全名>/信息/`
+- 信息文件：`mediainfo.txt` 或 `bdinfo.txt`
+- 截图固定 `1.png` 到 `6.png`，不足自动补齐复制（无源则创建占位）
+- 总报告：`$DATA_DIR/output/REPORT.md`
+
+### 6) 清理机制（绝对安全）
+- manifest 文件：`$DATA_DIR/state/manifest.txt`
+- 默认 dry-run，不实际删除
+- 真删必须二次确认（交互模式）
+- 仅允许删除 `manifest` 中且位于 `$DATA_DIR` 内的路径
+
+### 7) DATA_DIR 规则
+- 优先：`/opt/PT-BDtool/bdtool-output`（可写或 root）
+- 否则：`$HOME/.local/share/pt-bdtool/bdtool-output`
+- 再兜底：`/tmp/pt-bdtool/bdtool-output`
+- 不使用 `/usr/local/bin` 作为数据目录
+
+### 8) UI 规则落地
+- 默认中文（不依赖系统 LANG）
+- 严格单语（当前语言输出）
+- 菜单选项米黄色：
+  - 256 色：`38;5;223`
+  - fallback：`33`
+- 屏幕不刷 `[INFO]` 前缀，失败不退出菜单
+
+### 9) 日志系统
+- `RUN_LOG`: `$DATA_DIR/logs/run.log`
+- `UI_LOG`: `$DATA_DIR/logs/ui.log`
+- `REG_LOG`: `$DATA_DIR/logs/ux-regression.log`
+- 任务元数据：`$DATA_DIR/state/tasks/*.json`
 
 ## 改动文件清单
-- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
-- `/media/15sir/DataHub/Github/PT-BDtool/lib/i18n.sh`
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/i18n.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
 
-## 日志路径
-- `RUN_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/run.log`
-- `UI_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ui.log`
-- `REG_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ux-regression.log`
+## 复测结果（真实执行）
 
-## 复测结果
+日志：`/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ux-regression.log`
 
-| 用例 | 命令 | 结果 | 说明 |
-|---|---|---|---|
-| 默认中文：日志后退出 | `printf "5\n\n7\n" \| bdtool` | PASS | 默认中文，屏幕无 `[INFO]` 前缀 |
-| 默认中文：scan 子菜单返回 | `printf "3\n0\n7\n" \| bdtool` | PASS | 进入目录子菜单后返回主菜单 |
-| 英文模式退出 | `printf "7\n" \| bdtool --lang en` | PASS | 全英文界面 |
-| scan 失败回菜单 | `printf "3\n2\n\n7\n" \| bdtool` | PASS | 失败后仅一句提示并回菜单 |
-| 颜色能力记录 | `tput colors` + ANSI 示例写入 `REG_LOG` | PASS | 记录 `tput_colors=256` 与 `38;5;223` 示例 |
+| 用例 | 命令 | 结果 |
+|---|---|---|
+| install 启动显示菜单 | `script -qec 'bash ./install.sh' /dev/null <<< '7'` | PASS |
+| 扫描全盘风险提示 | `printf "3\n1\n0\n7\n" \| ./bdtool` | PASS |
+| 指定目录扫描 | `printf "3\n2\n/media/15sir/DataHub/Github/PT-BDtool\n\n7\n" \| ./bdtool` | PASS |
+| 后台扫描启动 | `printf "3\n3\n1\n/media/15sir/DataHub/Github/PT-BDtool\n\n0\n0\n7\n" \| ./bdtool` | PASS |
+| clean dry-run | `printf "4\n7\n" \| ./bdtool` | PASS |
+| 断点续扫模拟 | `./bdtool scan /media/15sir/DataHub/Github/PT-BDtool --resume` | PASS |
+| 默认中文无英文泄露 | `printf "7\n" \| ./bdtool | grep -Eq 'One-click|Doctor|Quit|Version'` | PASS |
 
 ## 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-cp -f lib/ui.sh.bak lib/ui.sh
-cp -f lib/i18n.sh.bak lib/i18n.sh
+cp -f install.sh.bak install.sh
 cp -f bdtool.bak bdtool
+cp -f lib/i18n.sh.bak lib/i18n.sh
 cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 ```
 
@@ -96,5 +112,5 @@ cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- lib/ui.sh lib/i18n.sh bdtool FINAL_REPORT.md
+git checkout -- install.sh bdtool lib/i18n.sh FINAL_REPORT.md
 ```
