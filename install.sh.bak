@@ -10,8 +10,15 @@ else
   echo "[ERROR] missing lib/ui.sh" >&2
   exit 1
 fi
+
 ensure_log_dir "$SCRIPT_DIR"
 setup_log_redirection "$SCRIPT_DIR"
+
+: "${BDTOOL_NO_PROMPT:=1}"
+: "${BDTOOL_CMD_TIMEOUT:=300}"
+: "${BDTOOL_FETCH_TIMEOUT:=45}"
+: "${BDTOOL_FETCH_RETRIES:=3}"
+: "${BDTOOL_HTTP_PROXY:=}"
 
 DO_K="0"
 ARG_LANG=""
@@ -75,28 +82,7 @@ detect_lang() {
     return 0
   fi
 
-  if [[ "${BDTOOL_NO_PROMPT:-1}" == "1" ]]; then
-    detect_default_lang
-    return 0
-  fi
-
-  if [[ -t 0 ]]; then
-    log_info "Waiting for language selection... / 正在等待选择语言..."
-    local def ans
-    def="$(detect_default_lang)"
-    if [[ "$def" == "zh" ]]; then
-      ans="$(prompt_with_default "输入 1(中文) 或 2(English)" "1")"
-    else
-      ans="$(prompt_with_default "Input 1(中文) or 2(English)" "2")"
-    fi
-    case "$ans" in
-      1) echo "zh" ;;
-      2) echo "en" ;;
-      *) detect_default_lang ;;
-    esac
-  else
-    detect_default_lang
-  fi
+  detect_default_lang
 }
 
 BD_LANG="$(detect_lang)"
@@ -126,16 +112,66 @@ sudo_cmd() {
   return 1
 }
 
-dl_to_file() {
+proxy_env_prefix() {
+  local p="${BDTOOL_HTTP_PROXY:-${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}}"
+  if [[ -n "$p" ]]; then
+    printf 'HTTP_PROXY=%q HTTPS_PROXY=%q http_proxy=%q https_proxy=%q NO_PROXY=%q no_proxy=%q' \
+      "$p" "$p" "$p" "$p" "${NO_PROXY:-${no_proxy:-}}" "${no_proxy:-${NO_PROXY:-}}"
+  else
+    printf ''
+  fi
+}
+
+curl_fetch() {
   local url="$1"
   local output="$2"
-  if need_cmd wget; then
-    wget -qO "$output" "$url"
-  elif need_cmd curl; then
-    curl -fsSL "$url" -o "$output"
+  local px
+  px="$(proxy_env_prefix)"
+
+  if [[ -n "$px" ]]; then
+    eval "$px" timeout "${BDTOOL_FETCH_TIMEOUT}s" curl -fL --connect-timeout 10 --retry 2 --retry-delay 1 --retry-all-errors -o "\"$output\"" "\"$url\""
   else
-    return 127
+    timeout "${BDTOOL_FETCH_TIMEOUT}s" curl -fL --connect-timeout 10 --retry 2 --retry-delay 1 --retry-all-errors -o "$output" "$url"
   fi
+}
+
+wget_fetch() {
+  local url="$1"
+  local output="$2"
+  local px
+  px="$(proxy_env_prefix)"
+
+  if [[ -n "$px" ]]; then
+    eval "$px" timeout "${BDTOOL_FETCH_TIMEOUT}s" wget -q --timeout=20 --tries=2 -O "\"$output\"" "\"$url\""
+  else
+    timeout "${BDTOOL_FETCH_TIMEOUT}s" wget -q --timeout=20 --tries=2 -O "$output" "$url"
+  fi
+}
+
+fetch_with_fallbacks() {
+  local output="$1"
+  shift
+  local urls=("$@")
+
+  [[ "${#urls[@]}" -gt 0 ]] || return 1
+  rm -f "$output"
+
+  local u i
+  for u in "${urls[@]}"; do
+    i=1
+    while [[ "$i" -le "$BDTOOL_FETCH_RETRIES" ]]; do
+      if need_cmd curl && curl_fetch "$u" "$output"; then
+        [[ -s "$output" ]] && return 0
+      fi
+      if need_cmd wget && wget_fetch "$u" "$output"; then
+        [[ -s "$output" ]] && return 0
+      fi
+      i=$((i + 1))
+    done
+  done
+
+  rm -f "$output"
+  return 1
 }
 
 install_deps() {
@@ -214,12 +250,20 @@ ensure_path_for_user_dir() {
   fi
 }
 
+download_bdtool_binary() {
+  local out="$1"
+  local urls=(
+    "https://raw.githubusercontent.com/My15sir/PT-BDtool/main/bdtool.sh"
+    "https://cdn.jsdelivr.net/gh/My15sir/PT-BDtool@main/bdtool.sh"
+  )
+  fetch_with_fallbacks "$out" "${urls[@]}"
+}
+
 install_bdinfo_cli() {
   local install_dir="$1"
   local os arch
   os="$(uname -s 2>/dev/null || true)"
   arch="$(uname -m 2>/dev/null || true)"
-  local url="https://github.com/tetrahydroc/BDInfoCLI/releases/latest/download/BDInfo-linux-x64.tar.gz"
 
   if [[ "$os" != "Linux" ]]; then
     msg "跳过 BDInfo 自动安装：仅支持 Linux x64。" "Skip BDInfo auto-install: only Linux x64 is supported."
@@ -238,7 +282,13 @@ install_bdinfo_cli() {
   tmpd="$(mktemp -d)"
   tarball="$tmpd/BDInfo-linux-x64.tar.gz"
 
-  execute_with_spinner "下载 BDInfoCLI-ng" dl_to_file "$url" "$tarball" || { rm -rf "$tmpd"; return 1; }
+  local urls=(
+    "https://github.com/tetrahydroc/BDInfoCLI/releases/latest/download/BDInfo-linux-x64.tar.gz"
+    "https://ghproxy.com/https://github.com/tetrahydroc/BDInfoCLI/releases/latest/download/BDInfo-linux-x64.tar.gz"
+  )
+
+  log_info "下载 BDInfoCLI-ng..."
+  fetch_with_fallbacks "$tarball" "${urls[@]}" || { rm -rf "$tmpd"; return 1; }
   execute_with_spinner "解压 BDInfoCLI-ng" tar -xzf "$tarball" -C "$tmpd" || { rm -rf "$tmpd"; return 1; }
   bdinfo_bin="$(find "$tmpd" -type f -name BDInfo | head -n 1 || true)"
   [[ -n "$bdinfo_bin" && -f "$bdinfo_bin" ]] || { rm -rf "$tmpd"; return 1; }
@@ -258,7 +308,7 @@ msg "安装开始" "Install started"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   msg "当前为 dry-run，仅做环境检测，不执行下载/安装。" "Dry-run mode, only checks environment without downloading/installing."
-  for c in bash ffmpeg ffprobe mediainfo BDInfo; do
+  for c in bash ffmpeg ffprobe mediainfo BDInfo curl wget; do
     if need_cmd "$c"; then
       log_success "found: $c"
     else
@@ -275,8 +325,8 @@ fi
 INSTALL_DIR="$(choose_install_dir)"
 mkdir -p "$INSTALL_DIR"
 
-BDTOOL_RAW_URL="https://raw.githubusercontent.com/My15sir/PT-BDtool/main/bdtool.sh"
-execute_with_spinner "下载 bdtool" dl_to_file "$BDTOOL_RAW_URL" "$INSTALL_DIR/bdtool" || die "failed to download bdtool"
+log_info "下载 bdtool..."
+download_bdtool_binary "$INSTALL_DIR/bdtool" || die "failed to download bdtool (check network/proxy and $BDTOOL_RUN_LOG)"
 chmod +x "$INSTALL_DIR/bdtool"
 
 ensure_path_for_user_dir "$INSTALL_DIR"
