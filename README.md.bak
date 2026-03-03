@@ -6,20 +6,66 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
 ```
 
-安装流程：
-1. 自动检测依赖（已安装会逐项提示；缺失自动安装）
-2. 自动安装 `bdtool` 命令入口
-3. 自动进入三项主菜单（默认中文）
+## 依赖安装稳定性（本次修复）
+
+安装脚本依赖阶段已改为“无人值守 + 可控超时 + 自动重试”：
+- `DEBIAN_FRONTEND=noninteractive`
+- `apt-get -y`（自动确认）
+- 默认低噪音：`-qq`（可通过 `APT_QUIET=0` 关闭）
+- 每个 apt 子步骤超时：`APT_TIMEOUT`（默认 `300` 秒）
+- 每步最多重试 `APT_RETRY_MAX` 次（默认 `3`，退避 `1/2/4` 秒）
+- apt/dpkg 锁等待上限：`APT_LOCK_WAIT`（默认 `60` 秒）
+
+当检测到锁占用超时，会明确提示：
+- “有其他 apt 进程占用”
+- 建议检查 `unattended-upgrades`/其他 apt 任务
+
+### 依赖安装排障命令
+
+```bash
+# 查看 apt/dpkg 进程
+ps -ef | egrep 'apt|apt-get|dpkg|unattended' | grep -v grep
+
+# 查看锁文件占用（若已安装 lsof/fuser）
+lsof /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock
+fuser /var/lib/dpkg/lock-frontend
+
+# 验证源可用性
+apt-get update
+```
+
+## 自举策略（curl|bash 场景）
+
+当直接执行远程 `install.sh` 且本地没有仓库文件时，会自动按顺序自举：
+1. `git clone --depth=1`
+2. 下载 tarball 并解压
+3. 下载 zipball 并解压
+
+每个策略均为：
+- 单次 300 秒超时
+- 最多 3 次重试
+- 指数退避 1s / 2s / 4s
+
+失败时会输出具体原因与建议（DNS/TLS/403/404/超时/命令缺失），并给出调试日志路径。
+
+### 自举失败排查（可复制命令）
+
+```bash
+# 1) 检查 DNS
+cat /etc/resolv.conf
+
+# 2) 安装证书与下载工具（Debian/Ubuntu）
+apt-get update && apt-get install -y ca-certificates git curl wget tar unzip
+
+# 3) 离线方案
+git clone https://github.com/My15sir/PT-BDtool.git && cd PT-BDtool && bash install.sh
+```
 
 ## 主菜单（严格单语，默认中文）
 
 1. 扫描
 2. 切换语言
 3. 退出
-
-说明：
-- 默认中文，不依赖系统 `LANG`
-- 仅 `--lang en`（或 `LANG_CODE=en`）进入英文
 
 ## 扫描闭环
 
@@ -36,13 +82,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/insta
 - ISO：`*.iso`
 - 默认排除：`/proc /sys /dev /run /tmp`
 
-### 扫描结果选择
-
-- 列出最多前 50 条结果（超出提示“更多已省略”）
-- 输入序号选择条目生成产物
-- 输入 `0` 返回
-- 非法输入最多重试 3 次，超限返回
-
 ### 生成产物
 
 输出目录：
@@ -56,15 +95,7 @@ $OUTPUT_ROOT/<安全名称>/信息/
 - 普通视频：`mediainfo.txt`
 - 截图固定 6 张：`1.png ... 6.png`
 
-截图说明：
-- 如果本机具备 `ffmpeg/ffprobe`，优先尝试真实截图
-- 若工具不足或失败，自动使用占位 PNG 并补齐到 6 张
-
 ### 下载到本地
-
-生成完成后可选择：
-1. 下载结果到本地（打包）
-2. 返回菜单
 
 下载目录：
 
@@ -74,21 +105,13 @@ $HOME/Downloads/PT-BDtool/
 
 优先 `zip`，否则 `tar.gz`。
 
-### 清理临时文件（安全）
-
-下载后会询问是否清理临时文件：
-- 仅清理本次任务产生的临时目录（`$OUTPUT_ROOT/cache/...`）
-- 不会删除源视频、原盘目录、ISO 等用户原始文件
-
 ## 错误文件（最小化）
 
-默认不写运行日志。仅在错误时生成：
+仅在错误时生成：
 
 ```text
 $OUTPUT_ROOT/last_error.txt
 ```
-
-文件中仅包含简短的错误原因和建议。
 
 ## 常用命令
 

@@ -4,29 +4,101 @@ set -Euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
-# shellcheck source=lib/i18n.sh
-source "$ROOT_DIR/lib/i18n.sh"
 
+: "${LANG_CODE:=zh}"
 : "${BDTOOL_NO_PROMPT:=0}"
-: "${BDTOOL_CMD_TIMEOUT:=300}"
 
 ensure_output_root
-
-TASK_TEMP_DIRS=()
+OUTPUT_INFO_ROOT="$OUTPUT_ROOT/信息"
+mkdir -p "$OUTPUT_INFO_ROOT"
+MAX_SCAN_DISPLAY=5
 
 on_err() {
   local rc=$?
-  write_error_file "unexpected error (rc=${rc})" "请重试；若持续失败，请检查依赖并重新安装。"
-  screen_error "$(t ERR_HINT_FILE)$ERROR_FILE"
+  write_error_file "执行失败 rc=$rc" "请检查输入目录或依赖后重试。"
+  screen_error "错误详情：$ERROR_FILE"
   exit "$rc"
 }
-
 trap on_err ERR
-trap 'write_error_file "interrupted" "重新执行命令。"; exit 130' INT TERM
+
+msg() {
+  local key="$1"
+  if [[ "$LANG_CODE" == "en" ]]; then
+    case "$key" in
+      main_title) echo "Main Menu" ;;
+      main_1) echo "1) Scan" ;;
+      main_2) echo "2) Switch language" ;;
+      main_3) echo "3) Quit" ;;
+      scan_title) echo "Scan" ;;
+      scan_1) echo "1) Full scan" ;;
+      scan_2) echo "2) Scan directory" ;;
+      scan_0) echo "0) Back" ;;
+      scan_warn_1) echo "Warning: full scan may take a long time." ;;
+      scan_warn_2) echo "Warning: full scan may cause high IO." ;;
+      scan_confirm) echo "Confirm full scan? 1) Continue 2) Back" ;;
+      prompt) echo "Select" ;;
+      invalid) echo "Invalid input" ;;
+      dir_prompt) echo "Enter directory" ;;
+      dir_invalid) echo "Directory invalid" ;;
+      none) echo "No items found" ;;
+      limit) echo "Only first 5 shown, others omitted" ;;
+      pick) echo "Input index/indexes (e.g. 1 or 1 2 3, 0 back)" ;;
+      pick_limit) echo "Too many invalid attempts" ;;
+      done) echo "Generated: " ;;
+      post_title) echo "Post process" ;;
+      post_1) echo "1) Download result package" ;;
+      post_2) echo "2) Cleanup generated files" ;;
+      post_0) echo "0) Next item" ;;
+      downloaded) echo "Downloaded: " ;;
+      cleaned) echo "Cleaned: " ;;
+      clean_missing) echo "Path not found, skip cleanup: " ;;
+      bye) echo "Bye" ;;
+      type_video) echo "video" ;;
+      type_bdmv) echo "bluray" ;;
+      type_iso) echo "iso" ;;
+      *) echo "$key" ;;
+    esac
+  else
+    case "$key" in
+      main_title) echo "主菜单" ;;
+      main_1) echo "1) 扫描" ;;
+      main_2) echo "2) 切换语言" ;;
+      main_3) echo "3) 退出" ;;
+      scan_title) echo "扫描" ;;
+      scan_1) echo "1) 扫描全盘" ;;
+      scan_2) echo "2) 扫描指定目录" ;;
+      scan_0) echo "0) 返回" ;;
+      scan_warn_1) echo "风险提示：全盘扫描耗时较长。" ;;
+      scan_warn_2) echo "风险提示：全盘扫描会产生较高 IO。" ;;
+      scan_confirm) echo "确认全盘扫描？1)继续 2)返回" ;;
+      prompt) echo "请输入选项" ;;
+      invalid) echo "输入无效" ;;
+      dir_prompt) echo "请输入目录" ;;
+      dir_invalid) echo "目录无效" ;;
+      none) echo "未发现可处理条目" ;;
+      limit) echo "仅显示前5条，其余已省略" ;;
+      pick) echo "请输入序号（如 1 或 1 2 3，0 返回）" ;;
+      pick_limit) echo "输入错误过多，已返回" ;;
+      done) echo "生成完成：" ;;
+      post_title) echo "结果处理" ;;
+      post_1) echo "1) 下载结果包" ;;
+      post_2) echo "2) 清理生成文件" ;;
+      post_0) echo "0) 下一个条目" ;;
+      downloaded) echo "已下载：" ;;
+      cleaned) echo "已清理：" ;;
+      clean_missing) echo "路径不存在，跳过清理：" ;;
+      bye) echo "已退出" ;;
+      type_video) echo "视频" ;;
+      type_bdmv) echo "原盘" ;;
+      type_iso) echo "ISO" ;;
+      *) echo "$key" ;;
+    esac
+  fi
+}
 
 read_line() {
   local prompt="$1"
-  local __out_var="$2"
+  local __out="$2"
   local line=""
 
   if [[ "$BDTOOL_NO_PROMPT" == "1" ]]; then
@@ -43,41 +115,27 @@ read_line() {
     return 1
   fi
 
-  printf -v "$__out_var" '%s' "$line"
+  printf -v "$__out" '%s' "$line"
   return 0
 }
 
 safe_name() {
-  local s="$1"
-  s="${s//\//_}"
-  s="${s// /_}"
-  s="$(echo "$s" | tr -cd '[:alnum:]_.-')"
-  [[ -n "$s" ]] || s="item"
-  printf "%s" "$s"
+  local n="$1"
+  n="${n// /_}"
+  n="$(echo "$n" | tr -cd '[:alnum:]_.-')"
+  [[ -n "$n" ]] || n="unknown"
+  echo "${n:0:64}"
 }
 
-short_hash() {
-  local input="$1"
-  if command -v sha1sum >/dev/null 2>&1; then
-    echo -n "$input" | sha1sum | awk '{print substr($1,1,8)}'
-  else
-    date +%s | tail -c 8
-  fi
-}
-
-is_video() {
-  case "${1,,}" in
-    *.mkv|*.mp4|*.avi|*.mov|*.ts|*.m2ts|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-create_task_context() {
-  local tid="task_$(date +%Y%m%d_%H%M%S)_$RANDOM"
-  local cache_dir="$OUTPUT_ROOT/cache/$tid"
-  mkdir -p "$cache_dir"
-  TASK_TEMP_DIRS+=("$cache_dir")
-  printf "%s" "$cache_dir"
+unique_dir() {
+  local base="$1"
+  local out="$OUTPUT_INFO_ROOT/$base"
+  local idx=2
+  while [[ -e "$out" ]]; do
+    out="$OUTPUT_INFO_ROOT/${base}_$idx"
+    idx=$((idx + 1))
+  done
+  echo "$out"
 }
 
 create_placeholder_png() {
@@ -90,384 +148,371 @@ create_placeholder_png() {
 }
 
 ensure_six_png() {
-  local info_dir="$1"
-  local last_file=""
+  local dir="$1"
+  local last=""
   local i
-
   for i in 1 2 3 4 5 6; do
-    if [[ -f "$info_dir/$i.png" ]]; then
-      last_file="$info_dir/$i.png"
+    if [[ -f "$dir/$i.png" ]]; then
+      last="$dir/$i.png"
       break
     fi
   done
-
   for i in 1 2 3 4 5 6; do
-    if [[ ! -f "$info_dir/$i.png" ]]; then
-      if [[ -n "$last_file" && -f "$last_file" ]]; then
-        cp -f "$last_file" "$info_dir/$i.png" 2>/dev/null || create_placeholder_png "$info_dir/$i.png"
+    if [[ ! -f "$dir/$i.png" ]]; then
+      if [[ -n "$last" && -f "$last" ]]; then
+        cp -f "$last" "$dir/$i.png" 2>/dev/null || create_placeholder_png "$dir/$i.png"
       else
-        create_placeholder_png "$info_dir/$i.png"
-        last_file="$info_dir/$i.png"
+        create_placeholder_png "$dir/$i.png"
+        last="$dir/$i.png"
       fi
     fi
   done
 }
 
-generate_mediainfo_file() {
-  local src="$1"
-  local out="$2"
-  if command -v mediainfo >/dev/null 2>&1; then
-    run_ext "$BDTOOL_CMD_TIMEOUT" mediainfo "$src" > "$out" 2>&1 || echo "mediainfo 执行失败" > "$out"
-  elif command -v ffprobe >/dev/null 2>&1; then
-    run_ext "$BDTOOL_CMD_TIMEOUT" ffprobe -v error -show_streams -show_format "$src" > "$out" 2>&1 || echo "ffprobe 执行失败" > "$out"
-  else
-    echo "未安装 mediainfo/ffprobe，使用占位信息。" > "$out"
-  fi
+is_video() {
+  case "${1,,}" in
+    *.mkv|*.mp4|*.avi|*.mov|*.ts|*.m2ts|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-generate_bdinfo_file() {
-  local src="$1"
-  local out="$2"
-  local target="$src"
-
-  if [[ -d "$src/BDMV" ]]; then
-    target="$src/BDMV"
-  fi
-
-  if command -v BDInfo >/dev/null 2>&1; then
-    run_ext "$BDTOOL_CMD_TIMEOUT" BDInfo -w "$target" "$(dirname "$out")" > "$out" 2>&1 || echo "BDInfo 执行失败" > "$out"
-  else
-    echo "未安装 BDInfo，使用占位信息。" > "$out"
-  fi
-}
-
-generate_video_shots() {
-  local src="$1"
-  local info_dir="$2"
-
-  if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
-    local duration dur_int i sec
-    duration="$(run_ext "$BDTOOL_CMD_TIMEOUT" ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
-    dur_int="${duration%.*}"
-    [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
-    (( dur_int < 12 )) && dur_int=12
-
-    for i in 1 2 3 4 5 6; do
-      sec=$(( (dur_int * i) / 7 ))
-      run_ext "$BDTOOL_CMD_TIMEOUT" ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$info_dir/$i.png" >/dev/null 2>&1 || true
-    done
-  fi
-
-  ensure_six_png "$info_dir"
-}
-
-collect_scan_items() {
+collect_results() {
   local target="$1"
   local full="$2"
+  local p type normalized
+
+  SCAN_TYPES=()
+  SCAN_ITEMS=()
+  unset SCAN_SEEN
+  declare -gA SCAN_SEEN=()
 
   if [[ "$full" == "1" ]]; then
-    run_ext "$BDTOOL_CMD_TIMEOUT" find / -xdev \
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
+        type="BDMV"
+        normalized="$(dirname "$p")"
+      elif [[ "${p,,}" == *.iso ]]; then
+        type="ISO"
+        normalized="$p"
+      elif is_video "$p"; then
+        type="VIDEO"
+        normalized="$p"
+      else
+        continue
+      fi
+      if [[ -z "${SCAN_SEEN[$normalized]:-}" ]]; then
+        SCAN_SEEN["$normalized"]=1
+        SCAN_TYPES+=("$type")
+        SCAN_ITEMS+=("$normalized")
+      fi
+    done < <(find / -maxdepth 4 \
       \( -path /proc -o -path /proc/* -o -path /sys -o -path /sys/* -o -path /dev -o -path /dev/* -o -path /run -o -path /run/* -o -path /tmp -o -path /tmp/* \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   else
-    run_ext "$BDTOOL_CMD_TIMEOUT" find "$target" -xdev \
+    while IFS= read -r p; do
+      [[ -n "$p" ]] || continue
+      if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
+        type="BDMV"
+        normalized="$(dirname "$p")"
+      elif [[ "${p,,}" == *.iso ]]; then
+        type="ISO"
+        normalized="$p"
+      elif is_video "$p"; then
+        type="VIDEO"
+        normalized="$p"
+      else
+        continue
+      fi
+      if [[ -z "${SCAN_SEEN[$normalized]:-}" ]]; then
+        SCAN_SEEN["$normalized"]=1
+        SCAN_TYPES+=("$type")
+        SCAN_ITEMS+=("$normalized")
+      fi
+    done < <(find "$target" \
       \( -path "$target/proc" -o -path "$target/proc/*" -o -path "$target/sys" -o -path "$target/sys/*" -o -path "$target/dev" -o -path "$target/dev/*" -o -path "$target/run" -o -path "$target/run/*" -o -path "$target/tmp" -o -path "$target/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   fi
 }
 
-build_scan_list() {
-  local target="$1"
-  local full="$2"
-  local list_file="$3"
+show_results() {
+  local total="${#SCAN_ITEMS[@]}"
+  local show_n i label
 
-  : > "$list_file"
-  local p t
-  while IFS= read -r p; do
-    [[ -n "$p" ]] || continue
-    if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
-      t="BDMV"
-      p="$(dirname "$p")"
-    elif [[ "${p,,}" == *.iso ]]; then
-      t="ISO"
-    elif is_video "$p"; then
-      t="VIDEO"
-    else
-      continue
-    fi
-    printf "%s|%s\n" "$t" "$p" >> "$list_file"
-  done < <(collect_scan_items "$target" "$full")
-
-  awk -F'|' '!seen[$2]++' "$list_file" > "$list_file.tmp" && mv -f "$list_file.tmp" "$list_file"
-}
-
-show_scan_results() {
-  local list_file="$1"
-  local -n type_ref=$2
-  local -n path_ref=$3
-
-  type_ref=()
-  path_ref=()
-
-  local line type path count=0
-  section "$(t SCAN_RESULTS)"
-  while IFS='|' read -r type path; do
-    [[ -n "$type" && -n "$path" ]] || continue
-    type_ref+=("$type")
-    path_ref+=("$path")
-    count=$((count + 1))
-    if (( count <= 50 )); then
-      printf "%d) [%s] %s\n" "$count" "$type" "$path"
-    fi
-  done < "$list_file"
-
-  if (( count == 0 )); then
-    screen "$(t SCAN_NONE)"
+  if (( total == 0 )); then
+    screen "$(msg none)"
     return 1
   fi
 
-  if (( count > 50 )); then
-    screen "$(t SCAN_MORE)"
+  show_n=$(( total > MAX_SCAN_DISPLAY ? MAX_SCAN_DISPLAY : total ))
+  for ((i=1; i<=show_n; i++)); do
+    case "${SCAN_TYPES[i-1]}" in
+      VIDEO) label="$(msg type_video)" ;;
+      BDMV) label="$(msg type_bdmv)" ;;
+      ISO) label="$(msg type_iso)" ;;
+      *) label="${SCAN_TYPES[i-1]}" ;;
+    esac
+    printf "%d) [%s] %s\n" "$i" "$label" "${SCAN_ITEMS[i-1]}"
+  done
+  if (( total > MAX_SCAN_DISPLAY )); then
+    screen "$(msg limit)"
   fi
-
   return 0
 }
 
-generate_for_item() {
+generate_item() {
   local type="$1"
   local src="$2"
+  local src_name safe out
 
-  local base safe out_dir info_dir
-  base="$(basename "$src")"
-  safe="$(safe_name "$base")_$(short_hash "$src")"
-  out_dir="$OUTPUT_ROOT/$safe"
-  info_dir="$out_dir/信息"
+  case "$type" in
+    VIDEO) src_name="$(basename "$(dirname "$src")")" ;;
+    BDMV) src_name="$(basename "$src")" ;;
+    ISO) src_name="$(basename "$(dirname "$src")")" ;;
+    *) src_name="unknown" ;;
+  esac
 
-  mkdir -p "$info_dir"
+  safe="$(safe_name "$src_name")"
+  out="$(unique_dir "$safe")"
+  mkdir -p "$out"
 
   if [[ "$type" == "VIDEO" ]]; then
-    generate_mediainfo_file "$src" "$info_dir/mediainfo.txt"
-    generate_video_shots "$src" "$info_dir"
+    if command -v mediainfo >/dev/null 2>&1; then
+      mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null || echo "mediainfo 执行失败" > "$out/mediainfo.txt"
+    else
+      echo "未安装 mediainfo，使用占位信息。" > "$out/mediainfo.txt"
+    fi
+
+    if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+      local duration dur_int i sec
+      duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
+      dur_int="${duration%.*}"
+      [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+      (( dur_int < 12 )) && dur_int=12
+      for i in 1 2 3 4 5 6; do
+        sec=$(( (dur_int * i) / 7 ))
+        ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1 || true
+      done
+    fi
+    ensure_six_png "$out"
   else
-    generate_bdinfo_file "$src" "$info_dir/bdinfo.txt"
-    ensure_six_png "$info_dir"
+    if command -v BDInfo >/dev/null 2>&1; then
+      if [[ "$type" == "BDMV" ]]; then
+        BDInfo -w "$src/BDMV" "$out" > "$out/bdinfo.txt" 2>/dev/null || echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+      else
+        BDInfo -w "$src" "$out" > "$out/bdinfo.txt" 2>/dev/null || echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+      fi
+    else
+      echo "未安装 BDInfo，使用占位信息。" > "$out/bdinfo.txt"
+    fi
   fi
 
-  screen "$(t GEN_DONE)$out_dir"
-  post_generate_menu "$safe" "$out_dir"
+  screen "$(msg done)$out"
+  LAST_OUTPUT_DIR="$out"
 }
 
-download_result() {
-  local safe="$1"
-  local out_dir="$2"
+download_item() {
+  local out="$1"
+  local base parent src_parent zip_path tar_path
+  src_parent="$(dirname "$out")"
+  parent="$HOME/Downloads/PT-BDtool"
+  mkdir -p "$parent"
+  base="$(basename "$out")"
+  zip_path="$parent/$base.zip"
+  tar_path="$parent/$base.tar.gz"
 
-  local dl_dir="$HOME/Downloads/PT-BDtool"
-  mkdir -p "$dl_dir"
-
-  local pkg=""
   if command -v zip >/dev/null 2>&1; then
-    pkg="$dl_dir/${safe}.zip"
-    (cd "$(dirname "$out_dir")" && run_ext "$BDTOOL_CMD_TIMEOUT" zip -qr "$pkg" "$(basename "$out_dir")") || return 1
-  else
-    pkg="$dl_dir/${safe}.tar.gz"
-    (cd "$(dirname "$out_dir")" && run_ext "$BDTOOL_CMD_TIMEOUT" tar -czf "$pkg" "$(basename "$out_dir")") || return 1
+    (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
+    screen "$(msg downloaded)$zip_path"
+    return 0
   fi
 
-  screen "$(t DL_DONE)$pkg"
+  tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
+  screen "$(msg downloaded)$tar_path"
   return 0
 }
 
-cleanup_task_temp() {
-  local p
-  for p in "${TASK_TEMP_DIRS[@]:-}"; do
-    [[ -n "$p" ]] || continue
-    case "$p" in
-      "$OUTPUT_ROOT"/cache/*) rm -rf "$p" 2>/dev/null || true ;;
-      *) ;;
-    esac
-  done
+cleanup_item() {
+  local out="$1"
+  if [[ -e "$out" ]]; then
+    rm -rf "$out"
+    screen "$(msg cleaned)$out"
+  else
+    screen "$(msg clean_missing)$out"
+  fi
 }
 
-post_generate_menu() {
-  local safe="$1"
-  local out_dir="$2"
+post_process_item() {
+  local out="$1"
+  local c retries
 
-  while true; do
-    menu_option "$(t POST_MENU_1)"
-    menu_option "$(t POST_MENU_2)"
-
-    local pick=""
-    read_line "$(t POST_PROMPT): " pick || return 0
-    case "$pick" in
-      1)
-        if download_result "$safe" "$out_dir"; then
-          screen "$(t CLEAN_TMP_PROMPT)"
-          menu_option "$(t CLEAN_TMP_1)"
-          menu_option "$(t CLEAN_TMP_2)"
-          local cpick=""
-          read_line "$(t POST_PROMPT): " cpick || cpick="2"
-          if [[ "$cpick" == "1" ]]; then
-            cleanup_task_temp
-          fi
-          screen "$(t ALL_DONE)"
-          return 0
-        else
-          write_error_file "package creation failed" "请检查 zip/tar 命令后重试。"
-          screen_error "$(t ERR_HINT_FILE)$ERROR_FILE"
-          return 1
-        fi
-        ;;
-      2)
-        return 0
-        ;;
-      *)
-        screen_error "$(t MENU_INVALID)"
-        ;;
-    esac
-  done
-}
-
-select_and_generate() {
-  local list_file="$1"
-  local -a types=()
-  local -a paths=()
-
-  show_scan_results "$list_file" types paths || return 0
-
-  local attempts=0
-  local pick=""
-  while (( attempts < 3 )); do
-    read_line "$(t SCAN_PICK): " pick || return 0
-
-    if [[ "$pick" == "0" ]]; then
-      return 0
-    fi
-
-    if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#types[@]} )); then
-      generate_for_item "${types[pick-1]}" "${paths[pick-1]}"
-      return 0
-    fi
-
-    attempts=$((attempts + 1))
-    screen_error "$(t SCAN_PICK_INVALID)"
-  done
-
-  screen "$(t SCAN_PICK_LIMIT)"
-  return 0
-}
-
-run_scan_flow() {
-  local target="$1"
-  local full="$2"
-
-  local task_cache
-  task_cache="$(create_task_context)"
-  local list_file="$task_cache/scan.list"
-
-  build_scan_list "$target" "$full" "$list_file"
-  select_and_generate "$list_file"
-}
-
-scan_menu() {
-  while true; do
-    section "$(t SCAN_TITLE)"
-    menu_option "$(t SCAN_MENU_1)"
-    menu_option "$(t SCAN_MENU_2)"
-    menu_option "$(t SCAN_MENU_0)"
-
-    local c=""
-    read_line "$(t MENU_PROMPT): " c || return 0
-
+  retries=0
+  while (( retries < 3 )); do
+    section "$(msg post_title)"
+    menu_option "$(msg post_1)"
+    menu_option "$(msg post_2)"
+    menu_option "$(msg post_0)"
+    read_line "$(msg prompt): " c || return 0
     case "$c" in
       1)
-        screen "$(t SCAN_WARN_1)"
-        screen "$(t SCAN_WARN_2)"
-        screen "$(t SCAN_WARN_3)"
-        local confirm=""
-        read_line "$(t SCAN_CONFIRM_FULL): " confirm || confirm="0"
-        [[ "$confirm" == "1" ]] || continue
-        run_scan_flow "/" "1"
+        download_item "$out" || screen_error "$(msg invalid)"
         ;;
       2)
-        local d=""
-        while true; do
-          read_line "$(t SCAN_DIR_PROMPT): " d || return 0
-          if [[ -d "$d" && -r "$d" ]]; then
-            run_scan_flow "$d" "0"
-            break
-          fi
-          screen_error "$(t SCAN_DIR_INVALID)"
-        done
+        cleanup_item "$out"
         ;;
       0)
         return 0
         ;;
       *)
-        screen_error "$(t MENU_INVALID)"
+        retries=$((retries + 1))
+        screen_error "$(msg invalid)"
         ;;
+    esac
+  done
+
+  screen "$(msg pick_limit)"
+  return 0
+}
+
+handle_multi_select() {
+  local raw="$1"
+  local tokens t idx
+  local -A seen=()
+  local -a selected=()
+
+  read -r -a tokens <<< "$raw"
+  if [[ "${#tokens[@]}" -eq 1 && "${tokens[0]}" == "0" ]]; then
+    return 1
+  fi
+
+  for t in "${tokens[@]}"; do
+    [[ "$t" =~ ^[0-9]+$ ]] || return 2
+    idx="$t"
+    if (( idx <= 0 || idx > MAX_SCAN_DISPLAY || idx > ${#SCAN_ITEMS[@]} )); then
+      return 2
+    fi
+    if [[ -z "${seen[$idx]:-}" ]]; then
+      seen[$idx]=1
+      selected+=("$idx")
+    fi
+  done
+
+  if (( ${#selected[@]} == 0 )); then
+    return 2
+  fi
+
+  for idx in "${selected[@]}"; do
+    generate_item "${SCAN_TYPES[idx-1]}" "${SCAN_ITEMS[idx-1]}"
+    post_process_item "$LAST_OUTPUT_DIR"
+  done
+
+  return 0
+}
+
+scan_flow() {
+  local target="$1"
+  local full="$2"
+  local pick retries rc
+
+  collect_results "$target" "$full"
+  show_results || return 0
+
+  retries=0
+  while (( retries < 3 )); do
+    read_line "$(msg pick): " pick || return 0
+    handle_multi_select "$pick"
+    rc=$?
+    if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then
+      return 0
+    fi
+    retries=$((retries + 1))
+    screen_error "$(msg invalid)"
+  done
+
+  screen "$(msg pick_limit)"
+  return 0
+}
+
+scan_menu() {
+  local c p retry
+  while true; do
+    section "$(msg scan_title)"
+    menu_option "$(msg scan_1)"
+    menu_option "$(msg scan_2)"
+    menu_option "$(msg scan_0)"
+    read_line "$(msg prompt): " c || return 0
+    case "$c" in
+      1)
+        screen "$(msg scan_warn_1)"
+        screen "$(msg scan_warn_2)"
+        read_line "$(msg scan_confirm): " c || return 0
+        if [[ "$c" == "1" ]]; then
+          scan_flow "/" "1"
+        fi
+        ;;
+      2)
+        retry=0
+        while (( retry < 3 )); do
+          read_line "$(msg dir_prompt): " p || return 0
+          if [[ -d "$p" && -r "$p" ]]; then
+            scan_flow "$p" "0"
+            break
+          fi
+          retry=$((retry + 1))
+          screen_error "$(msg dir_invalid)"
+        done
+        ;;
+      0) return 0 ;;
+      *) screen_error "$(msg invalid)" ;;
     esac
   done
 }
 
-switch_lang() {
-  if [[ "$LANG_CODE" == "zh" ]]; then
-    set_lang "en"
-    screen "$(t LANG_SW_TO_EN)"
-  else
-    set_lang "zh"
-    screen "$(t LANG_SW_TO_ZH)"
-  fi
-}
-
-show_help() {
-  screen "$(t HELP_TEXT)"
-}
-
 main_menu() {
+  local c
   while true; do
-    section "$(t MENU_TITLE)"
-    menu_option "$(t MENU_1)"
-    menu_option "$(t MENU_2)"
-    menu_option "$(t MENU_3)"
-
-    local choice=""
-    read_line "$(t MENU_PROMPT): " choice || return 0
-
-    case "$choice" in
+    section "$(msg main_title)"
+    menu_option "$(msg main_1)"
+    menu_option "$(msg main_2)"
+    menu_option "$(msg main_3)"
+    read_line "$(msg prompt): " c || return 0
+    case "$c" in
       1) scan_menu ;;
-      2) switch_lang ;;
-      3|q|Q) return 0 ;;
-      *) screen_error "$(t MENU_INVALID)" ;;
+      2)
+        if [[ "$LANG_CODE" == "zh" ]]; then LANG_CODE="en"; else LANG_CODE="zh"; fi
+        ;;
+      3|q|Q)
+        screen "$(msg bye)"
+        return 0
+        ;;
+      *) screen_error "$(msg invalid)" ;;
     esac
   done
 }
 
 main() {
-  local lang_override=""
-  local cmd=""
-
+  local lang=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --lang)
-        [[ $# -ge 2 ]] || { show_help; return 1; }
-        lang_override="$2"
+        lang="${2:-}"
         shift 2
         ;;
       --lang=*)
-        lang_override="${1#*=}"
+        lang="${1#*=}"
         shift
         ;;
       --non-interactive)
-        export BDTOOL_NO_PROMPT=1
+        BDTOOL_NO_PROMPT=1
         shift
         ;;
       --help|-h)
-        cmd="help"
-        shift
-        ;;
-      scan)
-        cmd="scan"
-        shift
+        if [[ "$LANG_CODE" == "en" ]]; then
+          echo "Usage: bdtool [--lang zh|en]"
+        else
+          echo "用法: bdtool [--lang zh|en]"
+        fi
+        exit 0
         ;;
       *)
         shift
@@ -475,27 +520,20 @@ main() {
     esac
   done
 
-  set_lang "$lang_override"
+  if [[ -n "$lang" ]]; then
+    if [[ "$lang" == "en" ]]; then LANG_CODE="en"; else LANG_CODE="zh"; fi
+  fi
 
-  case "$cmd" in
-    help)
-      show_help
-      ;;
-    scan)
-      if [[ "$BDTOOL_NO_PROMPT" == "1" ]]; then
-        show_help
-      else
-        scan_menu
-      fi
-      ;;
-    *)
-      if [[ "$BDTOOL_NO_PROMPT" == "1" ]]; then
-        show_help
-      else
-        main_menu
-      fi
-      ;;
-  esac
+  if [[ "$BDTOOL_NO_PROMPT" == "1" ]]; then
+    if [[ "$LANG_CODE" == "en" ]]; then
+      echo "Usage: bdtool [--lang zh|en]"
+    else
+      echo "用法: bdtool [--lang zh|en]"
+    fi
+    exit 0
+  fi
+
+  main_menu
 }
 
 main "$@"

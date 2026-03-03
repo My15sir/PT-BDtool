@@ -489,6 +489,28 @@ is_cmd_installed() {
   command -v "$1" >/dev/null 2>&1
 }
 
+is_apt_lock_active() {
+  local lock1="/var/lib/dpkg/lock-frontend"
+  local lock2="/var/lib/apt/lists/lock"
+  local lock3="/var/cache/apt/archives/lock"
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof "$lock1" "$lock2" "$lock3" >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    if fuser "$lock1" "$lock2" "$lock3" >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  fi
+  if pgrep -x apt >/dev/null 2>&1 || pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -f unattended-upgrades >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 show_apt_lock_holder() {
   local lock_file="$1"
   if command -v fuser >/dev/null 2>&1; then
@@ -502,6 +524,62 @@ show_apt_lock_holder() {
   screen "提示：可安装 lsof/fuser 以显示锁占用进程。"
 }
 
+collect_apt_lock_pids() {
+  local lock1="/var/lib/dpkg/lock-frontend"
+  local lock2="/var/lib/apt/lists/lock"
+  local lock3="/var/cache/apt/archives/lock"
+  local pids=""
+
+  pids+=" $(pgrep -x apt 2>/dev/null || true)"
+  pids+=" $(pgrep -x apt-get 2>/dev/null || true)"
+  pids+=" $(pgrep -x dpkg 2>/dev/null || true)"
+  pids+=" $(pgrep -f unattended-upgrades 2>/dev/null || true)"
+
+  if command -v fuser >/dev/null 2>&1; then
+    pids+=" $(fuser "$lock1" "$lock2" "$lock3" 2>/dev/null || true)"
+  fi
+
+  echo "$pids" | tr ' ' '\n' | awk '/^[0-9]+$/{print $1}' | sort -u | xargs 2>/dev/null || true
+}
+
+kill_pid_force() {
+  local pid="$1"
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    kill -TERM "$pid" 2>/dev/null || true
+  else
+    "${APT_SUDO_CMD[@]}" kill -TERM "$pid" 2>/dev/null || true
+  fi
+}
+
+kill_pid_hard() {
+  local pid="$1"
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    kill -KILL "$pid" 2>/dev/null || true
+  else
+    "${APT_SUDO_CMD[@]}" kill -KILL "$pid" 2>/dev/null || true
+  fi
+}
+
+force_recover_apt() {
+  local pids pid
+  pids="$(collect_apt_lock_pids)"
+  if [[ -n "$pids" ]]; then
+    screen "检测到 apt/dpkg 占用进程：$pids"
+    for pid in $pids; do
+      kill_pid_force "$pid"
+    done
+    sleep 5
+    for pid in $pids; do
+      if kill -0 "$pid" 2>/dev/null; then
+        kill_pid_hard "$pid"
+      fi
+    done
+  fi
+
+  screen "执行 dpkg --configure -a 修复状态..."
+  run_ext_boot "$APT_TIMEOUT" "${APT_SUDO_CMD[@]}" dpkg --configure -a >/dev/null 2>&1 || true
+}
+
 wait_for_apt_lock() {
   local max_wait="${1:-60}"
   local elapsed=0
@@ -509,16 +587,24 @@ wait_for_apt_lock() {
   local lock2="/var/lib/apt/lists/lock"
   local lock3="/var/cache/apt/archives/lock"
 
+  if is_apt_lock_active; then
+    screen "检测到 apt/dpkg 占用，尝试强制恢复..."
+    [[ -e "$lock1" ]] && show_apt_lock_holder "$lock1"
+    [[ -e "$lock2" ]] && show_apt_lock_holder "$lock2"
+    [[ -e "$lock3" ]] && show_apt_lock_holder "$lock3"
+    force_recover_apt
+  fi
+
   while (( elapsed < max_wait )); do
-    if pgrep -x apt >/dev/null 2>&1 || pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -f unattended-upgrades >/dev/null 2>&1; then
-      screen "检测到 apt/dpkg 正在占用，等待中（${elapsed}/${max_wait}s）..."
-    elif [[ -e "$lock1" || -e "$lock2" || -e "$lock3" ]]; then
-      screen "检测到 apt 锁文件，等待中（${elapsed}/${max_wait}s）..."
-    else
+    if ! is_apt_lock_active; then
       return 0
     fi
-    sleep 2
-    elapsed=$((elapsed + 2))
+    screen "apt/dpkg 仍被占用，继续等待（${elapsed}/${max_wait}s）..."
+    sleep 5
+    elapsed=$((elapsed + 5))
+    if (( elapsed % 10 == 0 )); then
+      force_recover_apt
+    fi
   done
 
   screen_error "有其他 apt 进程占用，等待超过 ${max_wait}s。"
@@ -532,23 +618,38 @@ run_timeout_retry() {
   local desc="$1"
   shift
   local attempt rc sleep_s
+  local out_file err_file
+  out_file="$(mktemp)"
+  err_file="$(mktemp)"
 
   for ((attempt=1; attempt<=APT_RETRY_MAX; attempt++)); do
-    if run_ext_boot "$APT_TIMEOUT" "$@"; then
+    run_ext_boot "$APT_TIMEOUT" "$@" >"$out_file" 2>"$err_file" &
+    local cmd_pid=$!
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+      screen "仍在${desc} ..."
+      sleep 10
+    done
+
+    if wait "$cmd_pid"; then
+      rm -f "$out_file" "$err_file"
       return 0
     fi
+
     rc=$?
+    tail -n 20 "$err_file" >&2 || true
     if [[ "$rc" -eq 124 ]]; then
       screen_error "${desc} 超时（>${APT_TIMEOUT}s），第 ${attempt}/${APT_RETRY_MAX} 次失败。"
     else
       screen_error "${desc} 失败（rc=${rc}），第 ${attempt}/${APT_RETRY_MAX} 次失败。"
     fi
     if (( attempt >= APT_RETRY_MAX )); then
+      rm -f "$out_file" "$err_file"
       return "$rc"
     fi
     sleep_s=$((2 ** (attempt - 1)))
     sleep "$sleep_s"
   done
+  rm -f "$out_file" "$err_file"
   return 1
 }
 
@@ -559,9 +660,9 @@ apt_update() {
   wait_for_apt_lock "$APT_LOCK_WAIT" || return 1
   screen "正在执行 apt-get update（超时 ${APT_TIMEOUT}s）..."
   if [[ "$APT_QUIET" == "1" ]]; then
-    run_timeout_retry "apt-get update" "${APT_SUDO_CMD[@]}" apt-get -y -qq update || return 1
+    run_timeout_retry "执行软件源更新" "${APT_SUDO_CMD[@]}" apt-get -y -qq update || return 1
   else
-    run_timeout_retry "apt-get update" "${APT_SUDO_CMD[@]}" apt-get -y update || return 1
+    run_timeout_retry "执行软件源更新" "${APT_SUDO_CMD[@]}" apt-get -y update || return 1
   fi
   APT_UPDATED=1
   return 0
@@ -572,9 +673,9 @@ apt_install() {
   wait_for_apt_lock "$APT_LOCK_WAIT" || return 1
   screen "正在安装 ${pkgs[*]}（超时 ${APT_TIMEOUT}s）..."
   if [[ "$APT_QUIET" == "1" ]]; then
-    run_timeout_retry "apt-get install ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y -qq install "${pkgs[@]}"
+    run_timeout_retry "安装 ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y -qq install "${pkgs[@]}"
   else
-    run_timeout_retry "apt-get install ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y install "${pkgs[@]}"
+    run_timeout_retry "安装 ${pkgs[*]}" "${APT_SUDO_CMD[@]}" apt-get -y install "${pkgs[@]}"
   fi
 }
 
@@ -597,9 +698,7 @@ check_and_install_dep() {
   screen "$dep_cmd $(t DEPEND_INSTALLING)"
 
   if ! apt_update; then
-    screen_error "$dep_cmd 安装前 apt-get update 失败。"
-    show_apt_failure_suggestions
-    return 1
+    screen_error "$dep_cmd 安装前 apt-get update 失败，将直接尝试安装一次。"
   fi
 
   if ! apt_install "$dep_pkg"; then

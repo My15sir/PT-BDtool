@@ -2,153 +2,117 @@
 
 LANG_CODE="${LANG_CODE:-zh}"
 
-i18n_normalize_lang() {
+normalize_lang() {
   case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
-    zh|zh_cn|zh-cn|cn|chinese) echo "zh" ;;
     en|en_us|en-us|english) echo "en" ;;
-    *) return 1 ;;
+    zh|zh_cn|zh-cn|cn|chinese|"") echo "zh" ;;
+    *) echo "zh" ;;
   esac
 }
 
 set_lang() {
-  local candidate="${1:-}"
-  local resolved=""
-
-  if [[ -n "$candidate" ]]; then
-    resolved="$(i18n_normalize_lang "$candidate" 2>/dev/null || true)"
+  local cli_lang="${1:-}"
+  if [[ -n "$cli_lang" ]]; then
+    LANG_CODE="$(normalize_lang "$cli_lang")"
   elif [[ -n "${LANG_CODE:-}" ]]; then
-    resolved="$(i18n_normalize_lang "$LANG_CODE" 2>/dev/null || true)"
-  elif [[ -n "${BDTOOL_LANG:-}" ]]; then
-    resolved="$(i18n_normalize_lang "$BDTOOL_LANG" 2>/dev/null || true)"
+    LANG_CODE="$(normalize_lang "$LANG_CODE")"
+  else
+    LANG_CODE="zh"
   fi
-
-  [[ -n "$resolved" ]] || resolved="zh"
-  LANG_CODE="$resolved"
   export LANG_CODE
-  export BDTOOL_LANG="$LANG_CODE"
 }
 
 t() {
   local key="$1"
   case "$LANG_CODE:$key" in
-    zh:APP_TITLE) echo "PT-BDtool 交互控制台" ;;
-    en:APP_TITLE) echo "PT-BDtool Interactive Console" ;;
-    zh:APP_SUBTITLE) echo "极限稳定版" ;;
-    en:APP_SUBTITLE) echo "Extreme stable edition" ;;
-    zh:VERSION_LABEL) echo "版本" ;;
-    en:VERSION_LABEL) echo "Version" ;;
-    zh:GITHUB_LABEL) echo "项目地址" ;;
-    en:GITHUB_LABEL) echo "GitHub" ;;
+    zh:APP_TITLE) echo "PT-BDtool" ;;
+    en:APP_TITLE) echo "PT-BDtool" ;;
+    zh:MENU_TITLE) echo "主菜单" ;;
+    en:MENU_TITLE) echo "Main Menu" ;;
+    zh:MENU_PROMPT) echo "请输入选项" ;;
+    en:MENU_PROMPT) echo "Choose an option" ;;
 
-    zh:MENU_PROMPT) echo "请输入选项（1-7，q退出）" ;;
-    en:MENU_PROMPT) echo "Choose an option (1-7, q to quit)" ;;
-    zh:MENU_INVALID) echo "无效选项，请重试。" ;;
-    en:MENU_INVALID) echo "Invalid option. Try again." ;;
-    zh:MENU_1) echo "1) 一键安装" ;;
-    en:MENU_1) echo "1) One-click install" ;;
-    zh:MENU_2) echo "2) 环境体检" ;;
-    en:MENU_2) echo "2) Doctor" ;;
-    zh:MENU_3) echo "3) 扫描/生成" ;;
-    en:MENU_3) echo "3) Scan/Generate" ;;
-    zh:MENU_4) echo "4) 清理" ;;
-    en:MENU_4) echo "4) Clean" ;;
-    zh:MENU_5) echo "5) 查看日志" ;;
-    en:MENU_5) echo "5) View logs" ;;
-    zh:MENU_6) echo "6) 切换语言" ;;
-    en:MENU_6) echo "6) Switch language" ;;
-    zh:MENU_7) echo "7) 退出" ;;
-    en:MENU_7) echo "7) Quit" ;;
-    zh:MENU_BYE) echo "已退出。" ;;
-    en:MENU_BYE) echo "Bye." ;;
+    zh:MENU_1) echo "1) 扫描" ;;
+    en:MENU_1) echo "1) Scan" ;;
+    zh:MENU_2) echo "2) 切换语言" ;;
+    en:MENU_2) echo "2) Switch language" ;;
+    zh:MENU_3) echo "3) 退出" ;;
+    en:MENU_3) echo "3) Quit" ;;
+    zh:MENU_INVALID) echo "输入无效，请重试。" ;;
+    en:MENU_INVALID) echo "Invalid input. Please retry." ;;
 
-    zh:HELP_TITLE) echo "用法" ;;
-    en:HELP_TITLE) echo "Usage" ;;
-    zh:HELP_DESC) echo "支持交互菜单与子命令模式。" ;;
-    en:HELP_DESC) echo "Supports interactive menu and command mode." ;;
-    zh:HELP_NONTTY_POLICY) echo "无参数且非交互终端：输出帮助并退出。" ;;
-    en:HELP_NONTTY_POLICY) echo "No args in non-interactive terminal: show help and exit." ;;
-
-    zh:ACTION_DONE) echo "已完成" ;;
-    en:ACTION_DONE) echo "completed" ;;
-    zh:ACTION_FAIL) echo "失败，详情见：" ;;
-    en:ACTION_FAIL) echo "failed, see: " ;;
-    zh:PRESS_ENTER_RETURN) echo "按回车返回菜单" ;;
-    en:PRESS_ENTER_RETURN) echo "Press Enter to return" ;;
-
-    zh:INSTALL_DONE) echo "安装完成，命令可用：bdtool" ;;
-    en:INSTALL_DONE) echo "Install done, command ready: bdtool" ;;
-    zh:INSTALL_NEXT) echo "下一步：执行“bdtool”进入菜单" ;;
-    en:INSTALL_NEXT) echo "Next: run 'bdtool' to open menu" ;;
-
-    zh:DOCTOR_DONE) echo "体检完成" ;;
-    en:DOCTOR_DONE) echo "Doctor completed" ;;
-    zh:SCAN_RUNNING) echo "扫描/生成" ;;
-    en:SCAN_RUNNING) echo "Scan/Generate" ;;
-
-    zh:SCAN_MENU_TITLE) echo "扫描模式" ;;
-    en:SCAN_MENU_TITLE) echo "Scan mode" ;;
+    zh:SCAN_TITLE) echo "扫描方式" ;;
+    en:SCAN_TITLE) echo "Scan Mode" ;;
     zh:SCAN_MENU_1) echo "1) 扫描全盘" ;;
     en:SCAN_MENU_1) echo "1) Full disk scan" ;;
     zh:SCAN_MENU_2) echo "2) 扫描指定目录" ;;
     en:SCAN_MENU_2) echo "2) Scan specific directory" ;;
-    zh:SCAN_MENU_3) echo "3) 后台扫描" ;;
-    en:SCAN_MENU_3) echo "3) Background scan" ;;
     zh:SCAN_MENU_0) echo "0) 返回" ;;
     en:SCAN_MENU_0) echo "0) Back" ;;
-    zh:SCAN_MENU_PROMPT) echo "请选择扫描模式" ;;
-    en:SCAN_MENU_PROMPT) echo "Choose scan mode" ;;
 
-    zh:SCAN_RISK_1) echo "风险提示：全盘扫描将产生高 IO。" ;;
-    en:SCAN_RISK_1) echo "Risk: full scan may cause high IO." ;;
-    zh:SCAN_RISK_2) echo "风险提示：任务可能持续较长时间。" ;;
-    en:SCAN_RISK_2) echo "Risk: task may run for a long time." ;;
-    zh:SCAN_RISK_3) echo "风险提示：可能影响系统性能。" ;;
-    en:SCAN_RISK_3) echo "Risk: system performance may be impacted." ;;
-    zh:SCAN_RISK_CONFIRM) echo "输入 1 继续，其它键返回" ;;
-    en:SCAN_RISK_CONFIRM) echo "Type 1 to continue, others to return" ;;
+    zh:SCAN_WARN_1) echo "全盘扫描可能耗时很久。" ;;
+    en:SCAN_WARN_1) echo "Full disk scan may take a long time." ;;
+    zh:SCAN_WARN_2) echo "全盘扫描会产生较高 IO。" ;;
+    en:SCAN_WARN_2) echo "Full disk scan may cause high IO." ;;
+    zh:SCAN_WARN_3) echo "可能影响系统性能。" ;;
+    en:SCAN_WARN_3) echo "System performance may be affected." ;;
+    zh:SCAN_CONFIRM_FULL) echo "输入 1 继续，其它键返回" ;;
+    en:SCAN_CONFIRM_FULL) echo "Type 1 to continue, other keys to go back" ;;
+    zh:SCAN_DIR_PROMPT) echo "请输入要扫描的目录" ;;
+    en:SCAN_DIR_PROMPT) echo "Enter directory to scan" ;;
+    zh:SCAN_DIR_INVALID) echo "目录无效，请重试。" ;;
+    en:SCAN_DIR_INVALID) echo "Invalid directory. Please retry." ;;
 
-    zh:SCAN_DIR_PROMPT) echo "请输入扫描目录" ;;
-    en:SCAN_DIR_PROMPT) echo "Enter scan directory" ;;
+    zh:SCAN_NONE) echo "未发现可处理条目。" ;;
+    en:SCAN_NONE) echo "No items found." ;;
+    zh:SCAN_RESULTS) echo "扫描结果（最多显示前 50 条）" ;;
+    en:SCAN_RESULTS) echo "Scan results (first 50 items)" ;;
+    zh:SCAN_MORE) echo "更多结果已省略。" ;;
+    en:SCAN_MORE) echo "More results omitted." ;;
+    zh:SCAN_PICK) echo "输入序号选择条目，输入 0 返回" ;;
+    en:SCAN_PICK) echo "Select an item number, 0 to return" ;;
+    zh:SCAN_PICK_INVALID) echo "选择无效，请重试。" ;;
+    en:SCAN_PICK_INVALID) echo "Invalid selection. Please retry." ;;
+    zh:SCAN_PICK_LIMIT) echo "错误次数过多，已返回。" ;;
+    en:SCAN_PICK_LIMIT) echo "Too many invalid attempts. Returned." ;;
 
-    zh:BG_MENU_1) echo "1) 启动后台扫描" ;;
-    en:BG_MENU_1) echo "1) Start background scan" ;;
-    zh:BG_MENU_2) echo "2) 查看任务状态" ;;
-    en:BG_MENU_2) echo "2) View task status" ;;
-    zh:BG_MENU_3) echo "3) 停止任务" ;;
-    en:BG_MENU_3) echo "3) Stop task" ;;
-    zh:BG_MENU_4) echo "4) 恢复扫描" ;;
-    en:BG_MENU_4) echo "4) Resume scan" ;;
-    zh:BG_MENU_0) echo "0) 返回" ;;
-    en:BG_MENU_0) echo "0) Back" ;;
-    zh:BG_MENU_PROMPT) echo "请选择后台操作" ;;
-    en:BG_MENU_PROMPT) echo "Choose background action" ;;
-    zh:BG_TASK_ID) echo "任务ID" ;;
-    en:BG_TASK_ID) echo "Task ID" ;;
-    zh:BG_STARTED) echo "后台任务已启动" ;;
-    en:BG_STARTED) echo "Background task started" ;;
+    zh:GEN_DONE) echo "生成完成：" ;;
+    en:GEN_DONE) echo "Generated: " ;;
+    zh:POST_MENU_1) echo "1) 下载结果到本地（打包下载）" ;;
+    en:POST_MENU_1) echo "1) Download result package" ;;
+    zh:POST_MENU_2) echo "2) 返回菜单" ;;
+    en:POST_MENU_2) echo "2) Back to menu" ;;
+    zh:POST_PROMPT) echo "请输入选项" ;;
+    en:POST_PROMPT) echo "Choose an option" ;;
 
-    zh:CLEAN_DRYRUN_DONE) echo "清理预演完成（未实际删除）" ;;
-    en:CLEAN_DRYRUN_DONE) echo "Clean dry-run completed (nothing deleted)" ;;
-    zh:CLEAN_CONFIRM_1) echo "确认执行实际删除吗？" ;;
-    en:CLEAN_CONFIRM_1) echo "Confirm real deletion?" ;;
-    zh:CLEAN_CONFIRM_2) echo "二次确认：仅删除 manifest 记录文件，继续？" ;;
-    en:CLEAN_CONFIRM_2) echo "Second confirm: delete only manifest entries, continue?" ;;
+    zh:DL_DONE) echo "下载包已生成：" ;;
+    en:DL_DONE) echo "Package created: " ;;
+    zh:CLEAN_TMP_PROMPT) echo "是否清理临时文件？" ;;
+    en:CLEAN_TMP_PROMPT) echo "Clean temporary files?" ;;
+    zh:CLEAN_TMP_1) echo "1) 清理" ;;
+    en:CLEAN_TMP_1) echo "1) Clean" ;;
+    zh:CLEAN_TMP_2) echo "2) 不清理" ;;
+    en:CLEAN_TMP_2) echo "2) Keep" ;;
+    zh:ALL_DONE) echo "已完成" ;;
+    en:ALL_DONE) echo "Done" ;;
 
-    zh:LANG_SWITCH_ZH) echo "已切换为中文。" ;;
-    en:LANG_SWITCH_ZH) echo "Switched to Chinese." ;;
-    zh:LANG_SWITCH_EN) echo "已切换为英文。" ;;
-    en:LANG_SWITCH_EN) echo "Switched to English." ;;
+    zh:LANG_SW_TO_ZH) echo "已切换到中文。" ;;
+    en:LANG_SW_TO_ZH) echo "Switched to Chinese." ;;
+    zh:LANG_SW_TO_EN) echo "已切换到英文。" ;;
+    en:LANG_SW_TO_EN) echo "Switched to English." ;;
 
-    zh:ERR_UNCAUGHT) echo "发生未捕捉错误。" ;;
-    en:ERR_UNCAUGHT) echo "Uncaught error occurred." ;;
-    zh:ERR_NEED_VALUE) echo "缺少参数值。" ;;
-    en:ERR_NEED_VALUE) echo "Missing parameter value." ;;
-    zh:ERR_INVALID_PATH) echo "路径无效或不可读。" ;;
-    en:ERR_INVALID_PATH) echo "Path is invalid or unreadable." ;;
-    zh:ERR_LOG_PATH) echo "详情见日志：" ;;
-    en:ERR_LOG_PATH) echo "See log: " ;;
-    zh:ERR_LOCKED) echo "已有任务运行中，请稍后重试。" ;;
-    en:ERR_LOCKED) echo "Another task is running. Please retry later." ;;
+    zh:HELP_TEXT) echo "用法: bdtool [--lang zh|en] [--help]" ;;
+    en:HELP_TEXT) echo "Usage: bdtool [--lang zh|en] [--help]" ;;
+
+    zh:DEPEND_OK) echo "已安装" ;;
+    en:DEPEND_OK) echo "installed" ;;
+    zh:DEPEND_INSTALLING) echo "正在安装" ;;
+    en:DEPEND_INSTALLING) echo "installing" ;;
+    zh:DEPEND_FAIL) echo "安装失败" ;;
+    en:DEPEND_FAIL) echo "install failed" ;;
+
+    zh:ERR_HINT_FILE) echo "错误详情：" ;;
+    en:ERR_HINT_FILE) echo "Error details: " ;;
 
     *) echo "$key" ;;
   esac
