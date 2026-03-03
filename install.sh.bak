@@ -554,7 +554,7 @@ auto_launch_menu_after_install() {
   fi
 
   msg "自动进入菜单界面..." "Launching interactive menu..."
-  BDTOOL_NO_PROMPT=0 "$menu_entry" --lang "$BD_LANG" || warn "menu exited with non-zero status"
+  BDTOOL_NO_PROMPT=0 "$menu_entry" --lang "$BD_LANG" || true
 }
 
 auto_launch_menu_after_install

@@ -1,65 +1,65 @@
 # FINAL_REPORT
 
-## 本次改动点（对应 A-F）
+## 修复概览
 
-### A) 菜单选项米黄色（真正生效）
-- 在 `lib/ui.sh` 增加菜单颜色检测：
-  - 终端支持 256 色：使用 `\033[38;5;223m`
-  - 不支持时回退：`\033[0;33m`
-- 新增函数 `color_menu_option()`，并在 `bdtool` 菜单渲染中只给选项行着色。
-- 保持分级日志颜色不变：`success` 绿色、`error` 红色、`warn` 黄色、`info` 青色。
+本次按最新验收要求重构了交互控制台：
+- 新增扫描/生成子菜单（目录数字选择）
+- 默认中文（仅显式 `--lang en` 或 `LANG_CODE=en` 时进入英文）
+- 严格单语渲染（菜单/提示/成功失败文案均按当前语言输出）
+- 默认隐藏 `[INFO]/[WARN]` 前缀，详细信息写入 `ui.log`
+- 菜单选项强制米黄色渲染（256 色优先，自动 fallback）
+- 失败不退出菜单，日志路径统一走 `DATA_DIR`
 
-### B) 菜单项单语显示
-- 保留双语字典（`lib/i18n.sh`），菜单渲染只取当前 `LANG_CODE`。
-- 菜单项从双语并列改为单语：
-  - `zh`：`1) 一键安装`
-  - `en`：`1) One-click install`
+## 关键实现
 
-### C) 交互后屏幕仅一句结果，细节写入日志
-- 在 `bdtool` 中统一动作包装器 `run_action()`：
-  - 屏幕显示 `section(label)`。
-  - 执行过程 stdout/stderr 全部重定向到 `UX_LOG`（`$DATA_DIR/logs/ui.log`）。
-  - 成功仅一行：如 `【成功】环境体检已完成` / `Doctor completed`。
-  - 失败仅一行：如 `【失败】扫描/生成失败，详情见：.../ui.log`。
-  - 然后显示 `按回车返回菜单 / Press Enter to return` 并回菜单。
-- 细节（错误堆栈、扫描参数、子命令输出）全部进入 `ui.log`。
+### 1) 选项 3 子菜单（扫描目录选择）
+- 新增 `scan_menu()`：先列目录，再数字选择，再执行 scan。
+- 目录来源优先级：
+  1. `PTBD_SCAN_DIRS`（冒号分隔）
+  2. 默认候选：
+     - `/opt/PT-BDtool`
+     - `/opt/PT-BDtool/bdtool-output`
+     - `$HOME`
+     - 当前目录 `$PWD`
+     - 仓库目录 `$ROOT_DIR`
+     - `BDTOOL_DATA_DIR`（若已解析）
+- 仅展示存在且可读目录，去重。
+- 支持 `0` 返回上一级。
+- 选择后执行：`bdtool.sh scan <选定目录> --mode dry`。
+- 失败仅一句提示并回主菜单，不退出 shell。
 
-### D) 失败不退出菜单
-- 菜单循环保持 `while true`，仅在 `7/q/Q` 时退出。
-- 子动作失败不会退出菜单主进程；不会掉回 shell。
-- 已避免出现 `menu exited with non-zero status` 这类误导提示。
+### 2) 默认中文 + 严格单语
+- `lib/i18n.sh` 中 `LANG_CODE` 默认 `zh`。
+- `set_lang` 策略：
+  - 优先 CLI `--lang`
+  - 其次显式环境变量 `LANG_CODE/BDTOOL_LANG`
+  - 否则固定 `zh`
+- 不再依据系统 `LANG/LC_ALL` 自动切语言。
+- 全部菜单与交互文案通过 `t(KEY)` 输出，按当前语言单语显示。
 
-### E) 统一当前语言成功/失败说明
-- 成功/失败文案由 `i18n` 的 `t(KEY)` 提供：
-  - `ACTION_SUCCESS_PREFIX / ACTION_DONE_SUFFIX`
-  - `ACTION_FAIL_PREFIX / ACTION_FAIL_SUFFIX`
-- 中文示例：
-  - 成功：`【成功】环境体检已完成`
-  - 失败：`【失败】扫描/生成失败，详情见：.../ui.log`
-- 英文示例：
-  - 成功：`Doctor completed`
-  - 失败：`Scan failed, see: .../ui.log`
+### 3) 屏幕最小输出（隐藏 INFO 刷屏）
+- `lib/ui.sh` 增加两套接口：
+  - 屏幕层：`screen_text/screen_success/screen_warn/screen_error`（无 `[INFO]` 前缀）
+  - 交互日志层：`ui_log_info/ui_log_warn/ui_log_error`（写 `UI_LOG`，带时间戳）
+- 菜单动作统一使用 `run_action()`：
+  - 详细命令输出重定向到 `UI_LOG`
+  - 屏幕仅显示一行结果 + “按回车返回菜单”
 
-### F) 其他 bug 修复
-1. 菜单重绘统一：每轮都使用同一 banner + 框线 + 选项渲染。
-2. `logs` 选项：默认 `tail -n 80`，并把完整日志路径写入 `ui.log`。
-3. `scan` 不可用时：显示 `扫描功能未实现，已跳过。/ Scan is not available, skipped.`，并回菜单。
-4. 路径策略统一：日志目录不再基于 `/usr/local/bin`，改为 `resolve_data_dir()` 可写数据目录策略。
+### 4) 菜单米黄色与兼容 fallback
+- 在 `lib/ui.sh` 里实现能力检测：
+  - `tput colors >= 256`：`MENU_OPT_COLOR='\033[38;5;223m'`
+  - 否则 fallback：`\033[33m`
+- 菜单选项行统一用 `color_menu_option` 包裹，并在行尾 `RESET`。
+- 未对全局文本做绿色覆盖，绿色仅用于成功提示。
 
-## 菜单颜色实现与 fallback 说明
-- 实现位置：`lib/ui.sh`。
-- 逻辑：
-  - `tput colors >= 256` → 菜单选项使用 `38;5;223`（米黄色）
-  - 否则使用 `33`（黄色）
-- 人工验证方法：
-  - 运行：`printf "7\n" | script -qec './bdtool --lang zh' /dev/null | cat -v`
-  - 输出中可见 `^[ [38;5;223m` ANSI 片段即为生效。
-
-## 屏幕输出最小化策略
-- 菜单动作执行时：
-  - 屏幕只显示阶段标题 + 一句成功/失败 + 返回提示。
-  - 详细过程写入：`$DATA_DIR/logs/ui.log`。
-- 全局统一运行日志仍追加到：`$DATA_DIR/logs/run.log`。
+### 5) 失败不退出菜单 + 数据目录路径修复
+- 主循环 `while true` 仅在 Quit 退出。
+- 子动作失败只影响当前动作提示，不影响菜单循环。
+- 日志目录统一由 `resolve_data_dir()` 计算：
+  - `/opt/PT-BDtool/bdtool-output`（可写或 root）
+  - 否则 `$HOME/.local/share/pt-bdtool/bdtool-output`
+  - 再兜底 `/tmp/pt-bdtool/bdtool-output`
+- 不再出现 `/usr/local/bin/bdtool-output`。
 
 ## 改动文件清单
 - `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
@@ -67,20 +67,20 @@
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
 
-## 复测结果
-
-日志路径：
+## 日志路径
 - `RUN_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/run.log`
-- `UX_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ui.log`
-- `ux-regression.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ux-regression.log`
+- `UI_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ui.log`
+- `REG_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ux-regression.log`
+
+## 复测结果
 
 | 用例 | 命令 | 结果 | 说明 |
 |---|---|---|---|
-| 菜单米黄色 ANSI 校验 | `printf "7\n" \| script -qec './bdtool --lang zh' /dev/null \| cat -v` | PASS | 输出包含 `\x1b[38;5;223m` |
-| 中文 doctor 一句结果 | `printf "2\n\n7\n" \| ./bdtool --lang zh` | PASS | 动作后仅一行成功说明 |
-| 中文 scan 失败不退菜单 | `printf "3\n\n7\n" \| ./bdtool --lang zh` | PASS | 失败后返回菜单，未掉回 shell |
-| 中文 logs 后回菜单 | `printf "5\n\n7\n" \| ./bdtool --lang zh` | PASS | tail 后回菜单 |
-| 英文 doctor 一句结果 | `printf "2\n\n7\n" \| ./bdtool --lang en` | PASS | `Doctor completed` |
+| 默认中文：日志后退出 | `printf "5\n\n7\n" \| bdtool` | PASS | 默认中文，屏幕无 `[INFO]` 前缀 |
+| 默认中文：scan 子菜单返回 | `printf "3\n0\n7\n" \| bdtool` | PASS | 进入目录子菜单后返回主菜单 |
+| 英文模式退出 | `printf "7\n" \| bdtool --lang en` | PASS | 全英文界面 |
+| scan 失败回菜单 | `printf "3\n2\n\n7\n" \| bdtool` | PASS | 失败后仅一句提示并回菜单 |
+| 颜色能力记录 | `tput colors` + ANSI 示例写入 `REG_LOG` | PASS | 记录 `tput_colors=256` 与 `38;5;223` 示例 |
 
 ## 回滚命令
 
