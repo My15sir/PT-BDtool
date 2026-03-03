@@ -13,3 +13,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: ShellCheck
         run: shellcheck -x bdtool.sh install.sh
+
+  cli-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make executable
+        run: chmod +x bdtool.sh
+      - name: Help
+        run: ./bdtool.sh -h
+      - name: Doctor
+        run: ./bdtool.sh doctor
+      - name: New entry dry
+        run: ./bdtool.sh ./bdtool.sh --mode dry
+      - name: Old entry dry
+        run: ./bdtool.sh scan ./bdtool.sh --out /tmp/bdtool-test --mode dry
+      - name: Short args and log levels
+        run: |
+          ./bdtool.sh ./bdtool.sh --mode dry -s 2 -j 1 --log-level debug
+          ./bdtool.sh ./bdtool.sh --mode dry --quiet

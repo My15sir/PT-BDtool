@@ -40,6 +40,47 @@ dl() {
   fi
 }
 
+install_bdinfo_cli() {
+  local install_dir="$1"
+  local os arch
+  os="$(uname -s 2>/dev/null || true)"
+  arch="$(uname -m 2>/dev/null || true)"
+
+  if [[ "$os" != "Linux" ]]; then
+    log "skip BDInfoCLI-ng auto install: only Linux x64 is supported"
+    return 0
+  fi
+
+  case "$arch" in
+    x86_64|amd64) ;;
+    *)
+      log "skip BDInfoCLI-ng auto install: unsupported arch $arch (need x64)"
+      return 0
+      ;;
+  esac
+
+  local url
+  url="https://github.com/tetrahydroc/BDInfoCLI/releases/latest/download/BDInfo-linux-x64.tar.gz"
+  local tmpd tarball bdinfo_bin
+  tmpd="$(mktemp -d)"
+  tarball="$tmpd/BDInfo-linux-x64.tar.gz"
+
+  log "install BDInfoCLI-ng (Linux x64 prebuilt)"
+  dl "$url" > "$tarball"
+  tar -xzf "$tarball" -C "$tmpd"
+
+  bdinfo_bin="$(find "$tmpd" -type f -name BDInfo | head -n 1 || true)"
+  [[ -n "$bdinfo_bin" && -f "$bdinfo_bin" ]] || { rm -rf "$tmpd"; die "BDInfoCLI-ng 安装失败：未找到 BDInfo 可执行文件"; }
+
+  if need_cmd install; then
+    install -m 0755 "$bdinfo_bin" "$install_dir/BDInfo"
+  else
+    cp "$bdinfo_bin" "$install_dir/BDInfo"
+    chmod +x "$install_dir/BDInfo"
+  fi
+  rm -rf "$tmpd"
+}
+
 start_docker_best_effort() {
   local SUDO
   SUDO="$(sudo_cmd)"
@@ -151,6 +192,9 @@ dl "$BDTOOL_RAW_URL" > "$INSTALL_DIR/bdtool"
 chmod +x "$INSTALL_DIR/bdtool"
 
 ensure_path_for_user_dir "$INSTALL_DIR"
+install_bdinfo_cli "$INSTALL_DIR"
+
+need_cmd BDInfo || die "安装后未检测到 BDInfo，请确认 PATH 包含 $INSTALL_DIR"
 
 log "installed: $INSTALL_DIR/bdtool"
 "$INSTALL_DIR/bdtool" --help >/dev/null 2>&1 || true

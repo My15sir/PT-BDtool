@@ -48,38 +48,78 @@ bash install.sh
 
 ## 使用 Usage
 
-扫描一个目录：
+新入口（推荐，自动输出到 `./bdtool-output`）：
+
+``` bash
+bdtool /path/to/videos
+```
+
+扫描单个视频文件（新入口）：
+
+``` bash
+bdtool movie.mkv
+```
+
+兼容旧入口（保持可用）：
 
 ``` bash
 bdtool scan /path/to/videos --out output
 ```
 
-扫描单个视频文件：
+短参数：
 
 ``` bash
-bdtool scan movie.mkv --out output
+bdtool movie.mkv -s 6 -j 2
 ```
 
-关闭截图或 MediaInfo：
+说明：截图数量最终固定为 **6 张**，命名严格为 `1.png` 到 `6.png`（`-s/--shots` 仅保留兼容参数）。
+
+dry 模式（等价 `--no-shots --no-mediainfo`）：
 
 ``` bash
-bdtool scan movie.mkv --out output --no-shots --no-mediainfo
+bdtool movie.mkv --mode dry
 ```
+
+日志级别：
+
+``` bash
+bdtool movie.mkv --log-level debug
+bdtool movie.mkv --quiet
+```
+
+参数优先级：
+
+- CLI 参数 > 环境变量（`OPT_*`）> 默认值
+
+------------------------------------------------------------------------
+
+## 迁移说明 Migration
+
+- 推荐从旧命令迁移到新入口：
+  - `bdtool scan <path> --out output` -> `bdtool <path>`
+- 旧 `scan` 子命令仍兼容可用，不会立即移除。
+- 若你依赖固定输出目录，请继续显式传 `--out <dir>`。
 
 ------------------------------------------------------------------------
 
 ## 输出示例 Example
 
-    output/
-    └── 20260302_scan_movie
-        └── movie.mkv
-            ├── mediainfo/
-            │   └── MEDIAINFO.txt
-            └── screenshots/
-                ├── screenshot_1.png
-                ├── screenshot_2.png
-                ├── screenshot_3.png
-                └── screenshot_4.png
+    bdtool-output/
+    └── 20260303_xxxxxx__scan_xxx
+        └── 20260303_xxxxxx__movie.mkv
+            └── 信息/
+                ├── mediainfo.txt
+                ├── 1.png
+                ├── 2.png
+                ├── 3.png
+                ├── 4.png
+                ├── 5.png
+                └── 6.png
+
+BDInfo 规则：
+
+- 仅当输入是 **Blu-ray BDMV/ISO** 时执行 BDInfo，并在 `信息/bdinfo.txt` 归档。
+- 非 BDMV/ISO 输入会跳过 BDInfo（不报错）。
 
 ------------------------------------------------------------------------
 
@@ -91,7 +131,12 @@ bdtool scan movie.mkv --out output --no-shots --no-mediainfo
 -   ffmpeg
 -   ffprobe
 -   mediainfo
--   docker（可选，用于 BDInfo）
+-   BDInfoCLI-ng（命令名 `BDInfo`，用于 BDMV/ISO）
+
+### BDInfoCLI 安装
+
+- Linux x64：运行 `install.sh` 会自动安装 BDInfoCLI-ng 预编译包（`BDInfo-linux-x64.tar.gz`）。
+- 手动安装来源：`tetrahydroc/BDInfoCLI` Releases。
 
 ------------------------------------------------------------------------
 
