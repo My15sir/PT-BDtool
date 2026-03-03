@@ -122,6 +122,8 @@ done
 
 set_lang "$LANG_OVERRIDE"
 
+INSTALL_ROOT=""
+
 install_target_root() {
   local target_root
   if [[ -w "/opt" || ${EUID:-$(id -u)} -eq 0 ]]; then
@@ -143,10 +145,10 @@ install_target_root() {
   else
     mkdir -p "$HOME/.local/bin"
     ln -sf "$target_root/bdtool" "$HOME/.local/bin/bdtool"
-    screen "请确保 ~/.local/bin 在 PATH 中。"
+    printf "请确保 ~/.local/bin 在 PATH 中。\n" >&2
   fi
 
-  echo "$target_root"
+  INSTALL_ROOT="$target_root"
 }
 
 pkg_manager_install() {
@@ -223,11 +225,11 @@ if [[ "$failed_dep" -ne 0 ]]; then
   screen_error "$(t ERR_HINT_FILE)$ERROR_FILE"
 fi
 
-target_root="$(install_target_root)"
-screen "安装目录：$target_root"
+install_target_root
+screen "安装目录：$INSTALL_ROOT"
 
 if [[ "$NON_INTERACTIVE" -eq 1 || ! -t 0 ]]; then
-  exec "$target_root/bdtool" --non-interactive --lang "$LANG_CODE"
+  exec "$INSTALL_ROOT/bdtool" --non-interactive --lang "$LANG_CODE"
 fi
 
-exec "$target_root/bdtool" --lang "$LANG_CODE"
+exec "$INSTALL_ROOT/bdtool" --lang "$LANG_CODE"

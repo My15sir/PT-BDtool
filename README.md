@@ -11,6 +11,33 @@ bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/insta
 2. 自动安装 `bdtool` 命令入口
 3. 自动进入三项主菜单（默认中文）
 
+## 自举策略（curl|bash 场景）
+
+当直接执行远程 `install.sh` 且本地没有仓库文件时，会自动按顺序自举：
+1. `git clone --depth=1`
+2. 下载 tarball 并解压
+3. 下载 zipball 并解压
+
+每个策略均为：
+- 单次 300 秒超时
+- 最多 3 次重试
+- 指数退避 1s / 2s / 4s
+
+失败时会输出具体原因与建议（DNS/TLS/403/404/超时/命令缺失），并给出调试日志路径。
+
+### 失败排查（可复制命令）
+
+```bash
+# 1) 检查 DNS
+cat /etc/resolv.conf
+
+# 2) 安装证书与下载工具（Debian/Ubuntu）
+apt-get update && apt-get install -y ca-certificates git curl wget tar unzip
+
+# 3) 离线方案
+git clone https://github.com/My15sir/PT-BDtool.git && cd PT-BDtool && bash install.sh
+```
+
 ## 主菜单（严格单语，默认中文）
 
 1. 扫描
