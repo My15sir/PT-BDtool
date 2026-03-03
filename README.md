@@ -4,7 +4,7 @@
 ![CI](https://github.com/My15sir/PT-BDtool/actions/workflows/ci.yml/badge.svg)
 ![Stars](https://img.shields.io/github/stars/My15sir/PT-BDtool?style=social)
 
-🇨🇳 [中文说明（默认）](#中文说明) | 🇬🇧 [English Documentation](#english-documentation)
+🇬🇧 English version: see README.en.md
 
 ## 中文说明
 
@@ -116,108 +116,5 @@ bdtool-output/
 - 如遇问题，请自行排查或咨询 GPT。
 
 ### 许可证 License
-
-MIT License
-
----
-
-## English Documentation
-
-A Bash tool for generating PT upload materials automatically.
-
-### Quick Start
-
-```bash
-./bdtool.sh install
-./bdtool.sh doctor
-./bdtool.sh /path/to/video_or_BDMV_or_iso
-./bdtool.sh clean
-```
-
-### Output Structure Rules
-
-- All reports and screenshots are stored in: `输出目录/信息/`
-- Screenshot files are fixed: `1.png~6.png`
-- `bdinfo.txt` is generated only for BDMV/ISO
-
-### Features
-
-- Generate MediaInfo automatically
-- Generate BDInfo for Blu-ray sources (BDMV/ISO)
-- Capture screenshots automatically
-- Directory and single-file scanning
-- Parallel processing
-
-### Install
-
-One-line install:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
-```
-
-Or clone:
-
-```bash
-git clone https://github.com/My15sir/PT-BDtool.git
-cd PT-BDtool
-bash install.sh
-```
-
-### Usage
-
-Preferred entry:
-
-```bash
-./bdtool.sh /path/to/videos
-```
-
-Compatibility entry:
-
-```bash
-./bdtool.sh scan /path/to/videos --out output
-```
-
-Dry mode:
-
-```bash
-./bdtool.sh /path/to/videos --mode dry
-```
-
-### Output Example
-
-```text
-bdtool-output/
-└── 20260303_xxxxxx__scan_xxx
-    └── 20260303_xxxxxx__movie.mkv
-        └── 信息/
-            ├── mediainfo.txt
-            ├── 1.png
-            ├── 2.png
-            ├── 3.png
-            ├── 4.png
-            ├── 5.png
-            └── 6.png
-```
-
-### Requirements
-
-- bash
-- ffmpeg
-- ffprobe
-- mediainfo
-- BDInfoCLI-ng (`BDInfo` command, for BDMV/ISO)
-
-### BDInfoCLI Install
-
-- On Linux x64, `install.sh` installs the prebuilt package (`BDInfo-linux-x64.tar.gz`) automatically.
-- Manual source: `tetrahydroc/BDInfoCLI` Releases.
-
-### Contributing
-
-- This is an AI-generated project.
-- Issues / feature requests / pull requests are currently not accepted.
-
-### License
 
 MIT License
