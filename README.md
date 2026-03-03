@@ -4,7 +4,7 @@
 ![CI](https://github.com/My15sir/PT-BDtool/actions/workflows/ci.yml/badge.svg)
 ![Stars](https://img.shields.io/github/stars/My15sir/PT-BDtool?style=social)
 
-🇬🇧 English version: see README.en.md
+🇬🇧 English version: see [README.en.md](README.en.md)
 
 ## 中文说明
 
