@@ -2,41 +2,20 @@
 set -euo pipefail
 
 # =====================
-# Bootstrap
+# Module: core
 # =====================
-BT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BDTOOL_ROOT="$BT_SCRIPT_DIR"
-if [[ -f "$BT_SCRIPT_DIR/lib/ui.sh" ]]; then
-  # shellcheck source=lib/ui.sh
-  source "$BT_SCRIPT_DIR/lib/ui.sh"
-else
-  log_info() { printf "[INFO] %s\n" "$*" >&2; }
-  log_warn() { printf "[WARN] %s\n" "$*" >&2; }
-  log_err() { printf "[ERROR] %s\n" "$*" >&2; }
-  log_success() { printf "[SUCCESS] %s\n" "$*" >&2; }
-  hr() { printf "================================================================\n" >&2; }
-  section() { hr; printf "%s\n" "$*" >&2; hr; }
-  prompt_with_default() { local p="${1:-请输入值}" d="${2:-}" v=""; read -r -p "  ▶ ${p} [默认 ${d}]: " v < /dev/tty || true; printf "%s" "${v:-$d}"; }
-  validate_nonempty() { [[ -n "${1:-}" ]]; }
-  validate_int_range() { local v="${1:-}" min="${2:-1}" max="${3:-65535}"; [[ "$v" =~ ^[0-9]+$ ]] && (( v >= min && v <= max )); }
-  ensure_log_dir() { local root="${1:-$BT_SCRIPT_DIR}"; BDTOOL_ROOT="$root"; BDTOOL_LOG_DIR="$root/bdtool-output/logs"; BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"; mkdir -p "$BDTOOL_LOG_DIR"; touch "$BDTOOL_RUN_LOG"; }
-  setup_log_redirection() { ensure_log_dir "${1:-$BT_SCRIPT_DIR}"; [[ "${BDTOOL_LOG_REDIRECTED:-0}" == "1" ]] && return 0; BDTOOL_LOG_REDIRECTED=1; exec > >(tee -a "$BDTOOL_RUN_LOG") 2> >(tee -a "$BDTOOL_RUN_LOG" >&2); }
-  execute_with_spinner() { local m="$1"; shift; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; "$@" >> "$BDTOOL_RUN_LOG" 2>&1; local r=$?; [[ "$r" -eq 0 ]] && log_success "$m 完成" || log_err "$m 失败 (请查看 $BDTOOL_RUN_LOG)"; return "$r"; }
-  die() { local m="${1:-执行失败}" c="${2:-1}"; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; log_err "$m"; log_err "详情日志：$BDTOOL_RUN_LOG"; exit "$c"; }
-fi
-
 APP_NAME="bdtool"
 
-bt_die() { die "$*"; }
+bt_die() { echo "[ERROR] $*" >&2; exit 1; }
 bt_log() {
   local level="${OPT_LOG_LEVEL:-normal}"
   [[ "$level" == "quiet" ]] && return 0
-  log_info "[$APP_NAME] $*"
+  echo "[$APP_NAME] $*"
 }
 bt_debug() {
   local level="${OPT_LOG_LEVEL:-normal}"
   [[ "$level" == "debug" ]] || return 0
-  log_info "[$APP_NAME][DEBUG] $*"
+  echo "[$APP_NAME][DEBUG] $*"
 }
 bt_need_cmd() { command -v "$1" >/dev/null 2>&1 || bt_die "缺少依赖命令：$1"; }
 
@@ -155,7 +134,7 @@ bt_make_screenshots() {
 
   local idx=1
   while read -r sec; do
-    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/${idx}.png" || bt_die "截图失败：$video"
+    ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/${idx}.png"
     idx=$((idx + 1))
   done < <(bt_pick_random_seconds "$duration" "$n")
 }
@@ -166,7 +145,7 @@ bt_run_mediainfo_report() {
 
   bt_need_cmd mediainfo
   mkdir -p "$info_dir"
-  execute_with_spinner "生成 MediaInfo" bash -c 'mediainfo "$1" > "$2"' _ "$video" "$info_dir/mediainfo.txt" || bt_die "MediaInfo 生成失败：$video"
+  mediainfo "$video" > "$info_dir/mediainfo.txt"
 }
 
 bt_run_bdinfo_report() {
@@ -177,7 +156,7 @@ bt_run_bdinfo_report() {
   mkdir -p "$info_dir"
 
   bt_log "BDInfo: run on $bd_path"
-  execute_with_spinner "生成 BDInfo" BDInfo -w "$bd_path" "$info_dir" || bt_die "BDInfo 执行失败：$bd_path"
+  BDInfo -w "$bd_path" "$info_dir"
 
   local latest_txt
   latest_txt="$(find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'bdinfo.txt' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
@@ -320,10 +299,8 @@ bt_process_local_scan() {
 
   if [[ -f "$scan_path" ]]; then
     bt_is_video_file "$scan_path" || bt_die "不支持的文件类型：$scan_path（仅视频文件或 Blu-ray BDMV/ISO）"
-    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
-    local worker_cmd
-    worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$task_out")"
-    execute_with_spinner "处理视频 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
+    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL
+    bash -c "$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$task_out")"
     echo "$task_out"
     return 0
   fi
@@ -337,18 +314,16 @@ bt_process_local_scan() {
 
   local cmds=()
   local v
-  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
+  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL
   for v in "${video_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$task_out")")
   done
 
   if [[ "$OPT_JOBS" -le 1 ]]; then
     local c
-    for c in "${cmds[@]}"; do
-      execute_with_spinner "处理视频任务" bash -c "$c" || bt_die "处理失败：$scan_path"
-    done
+    for c in "${cmds[@]}"; do bash -c "$c"; done
   else
-    execute_with_spinner "并行处理 ${#cmds[@]} 个视频任务" bt_run_with_jobs "$OPT_JOBS" "${cmds[@]}" || bt_die "并行处理失败：$scan_path"
+    bt_run_with_jobs "$OPT_JOBS" "${cmds[@]}"
   fi
 
   echo "$task_out"
@@ -389,26 +364,18 @@ USAGE
 }
 
 bt_cmd_doctor() {
-  section "doctor"
+  echo "== doctor =="
   local c
   for c in find sort od awk sed; do
-    if command -v "$c" >/dev/null 2>&1; then
-      log_success "OK: $c"
-    else
-      log_warn "MISS: $c"
-    fi
+    command -v "$c" >/dev/null 2>&1 && echo "OK: $c" || echo "MISS: $c"
   done
   for c in ffmpeg ffprobe mediainfo; do
-    if command -v "$c" >/dev/null 2>&1; then
-      log_success "OK: $c"
-    else
-      log_warn "MISS: $c"
-    fi
+    command -v "$c" >/dev/null 2>&1 && echo "OK: $c" || echo "MISS: $c"
   done
   if command -v BDInfo >/dev/null 2>&1; then
-    log_success "OK: BDInfo"
+    echo "OK: BDInfo"
   else
-    log_warn "MISS: BDInfo (安装提示：运行 install.sh，Linux x64 会自动安装 BDInfoCLI-ng)"
+    echo "MISS: BDInfo (安装提示：运行 install.sh，Linux x64 会自动安装 BDInfoCLI-ng)"
   fi
 }
 
@@ -422,7 +389,6 @@ bt_try_version_cmd() {
 }
 
 bt_cmd_status() {
-  section "status"
   local locale="${LC_ALL:-${LANG:-}}"
   local is_zh=0
   [[ "$locale" == *zh* || "$locale" == *ZH* ]] && is_zh=1
@@ -441,37 +407,37 @@ bt_cmd_status() {
   fi
 
   if [[ "$is_zh" == "1" ]]; then
-    log_info "[bdtool] 安装路径：$install_path"
-    log_info "[bdtool] 版本：$version"
-    log_info "[bdtool] 依赖检查："
+    echo "[bdtool] 安装路径：$install_path"
+    echo "[bdtool] 版本：$version"
+    echo "[bdtool] 依赖检查："
   else
-    log_info "[bdtool] Install path: $install_path"
-    log_info "[bdtool] Version: $version"
-    log_info "[bdtool] Dependency check:"
+    echo "[bdtool] Install path: $install_path"
+    echo "[bdtool] Version: $version"
+    echo "[bdtool] Dependency check:"
   fi
 
   local fail=0
   local dep
   for dep in ffmpeg ffprobe mediainfo BDInfo; do
     if command -v "$dep" >/dev/null 2>&1; then
-      log_success "OK: $dep"
+      echo "  OK: $dep"
     else
-      log_warn "MISS: $dep"
+      echo "  MISS: $dep"
       fail=1
     fi
   done
 
   if [[ "$is_zh" == "1" ]]; then
     if [[ "$fail" -eq 0 ]]; then
-      log_success "[bdtool] 结果：PASS"
+      echo "[bdtool] 结果：PASS"
     else
-      log_err "[bdtool] 结果：FAIL"
+      echo "[bdtool] 结果：FAIL"
     fi
   else
     if [[ "$fail" -eq 0 ]]; then
-      log_success "[bdtool] Result: PASS"
+      echo "[bdtool] Result: PASS"
     else
-      log_err "[bdtool] Result: FAIL"
+      echo "[bdtool] Result: FAIL"
     fi
   fi
 
@@ -479,10 +445,12 @@ bt_cmd_status() {
 }
 
 bt_cmd_install() {
-  section "install"
-  execute_with_spinner "运行安装脚本" ./install.sh || bt_die "安装失败"
-  execute_with_spinner "运行依赖检查" "$0" doctor || bt_die "安装后依赖检查失败"
-  log_success "INSTALL OK"
+  if ./install.sh && "$0" doctor; then
+    echo "INSTALL OK"
+  else
+    echo "INSTALL FAIL"
+    exit 1
+  fi
 }
 
 bt_cmd_clean() {
@@ -490,10 +458,10 @@ bt_cmd_clean() {
   [[ "$target" == "./bdtool-output" ]] || bt_die "clean safety check failed"
 
   if [[ -d "$target" ]]; then
-    execute_with_spinner "清理输出目录" rm -rf -- "$target" || bt_die "清理失败"
+    rm -rf -- "$target"
     bt_log "cleaned: $target"
   else
-    log_info "nothing to clean"
+    echo "nothing to clean"
   fi
 }
 
@@ -515,47 +483,48 @@ bt_main_scan() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --log-level)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--log-level requires a value. Example: ./bdtool.sh <path> --log-level debug"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: --log-level requires a value. Example: ./bdtool.sh <path> --log-level debug" >&2; exit 1; }
         case "$2" in
           quiet|normal|debug) OPT_LOG_LEVEL="$2" ;;
-          *) bt_die "invalid log level: $2. Use quiet|normal|debug" ;;
+          *) echo "ERROR: invalid log level: $2. Use quiet|normal|debug" >&2; exit 1 ;;
         esac
         shift 2
         ;;
       --out)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--out requires a value. Example: ./bdtool.sh scan <path> --out ./bdtool-output"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: --out requires a value. Example: ./bdtool.sh scan <path> --out ./bdtool-output" >&2; exit 1; }
         out_dir="${2:-}"
         shift 2
         ;;
       --no-mediainfo) OPT_MEDIAINFO=0; shift 1 ;;
       --no-shots) OPT_SHOTS=0; shift 1 ;;
       --mode)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--mode requires a value. Example: ./bdtool.sh <path> --mode dry"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: --mode requires a value. Example: ./bdtool.sh <path> --mode dry" >&2; exit 1; }
         if [[ "$2" == "dry" ]]; then
           OPT_MEDIAINFO=0
           OPT_SHOTS=0
         else
-          bt_die "unsupported mode: $2. Example: ./bdtool.sh <path> --mode dry"
+          echo "ERROR: unsupported mode: $2. Example: ./bdtool.sh <path> --mode dry" >&2
+          exit 1
         fi
         shift 2
         ;;
       --shots)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--shots requires a value. Example: ./bdtool.sh <path> --shots 4"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: --shots requires a value. Example: ./bdtool.sh <path> --shots 4" >&2; exit 1; }
         OPT_SHOTS_N="${2:-}"
         shift 2
         ;;
       -s)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "-s requires a value. Example: ./bdtool.sh <path> -s 4"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: -s requires a value. Example: ./bdtool.sh <path> -s 4" >&2; exit 1; }
         OPT_SHOTS_N="${2:-}"
         shift 2
         ;;
       --jobs)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--jobs requires a value. Example: ./bdtool.sh <path> --jobs 2"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: --jobs requires a value. Example: ./bdtool.sh <path> --jobs 2" >&2; exit 1; }
         OPT_JOBS="${2:-}"
         shift 2
         ;;
       -j)
-        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "-j requires a value. Example: ./bdtool.sh <path> -j 2"
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || { echo "ERROR: -j requires a value. Example: ./bdtool.sh <path> -j 2" >&2; exit 1; }
         OPT_JOBS="${2:-}"
         shift 2
         ;;
@@ -588,14 +557,10 @@ bt_main_scan() {
 
 bt_main() {
   if [[ "${1:-}" == "__worker_video" ]]; then
-    ensure_log_dir "$BT_SCRIPT_DIR"
     shift
     bt_worker_entry "$1" "$2"
     exit 0
   fi
-
-  ensure_log_dir "$BT_SCRIPT_DIR"
-  setup_log_redirection "$BT_SCRIPT_DIR"
 
   [[ $# -gt 0 ]] || { bt_usage; exit 0; }
 
