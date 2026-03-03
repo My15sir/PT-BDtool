@@ -126,6 +126,7 @@ trap 'error "发生未捕捉错误，详情见日志"; error "详情日志：$BD
 DO_K="0"
 ARG_LANG=""
 DRY_RUN="0"
+NON_INTERACTIVE="0"
 INSTALL_PASSWORD="${BDTOOL_INSTALL_PASSWORD:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -142,6 +143,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       DRY_RUN="1"
+      shift
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE="1"
+      BDTOOL_NO_PROMPT=1
       shift
       ;;
     --password)
@@ -524,3 +530,31 @@ fi
 
 msg "安装完成" "Install completed"
 msg "下一步：bdtool doctor" "Next: bdtool doctor"
+
+auto_launch_menu_after_install() {
+  local auto_launch="${AUTO_LAUNCH_MENU:-1}"
+  [[ "$auto_launch" == "1" ]] || return 0
+  [[ "$DRY_RUN" == "0" ]] || return 0
+  [[ "$NON_INTERACTIVE" == "0" ]] || return 0
+  if [[ ! -t 0 ]]; then
+    msg "检测到非交互终端，跳过自动菜单。" "Non-interactive terminal detected, skip auto menu launch."
+    return 0
+  fi
+
+  local menu_entry=""
+  if command -v bdtool >/dev/null 2>&1; then
+    menu_entry="$(command -v bdtool)"
+  elif [[ -x "$SCRIPT_DIR/bdtool" ]]; then
+    menu_entry="$SCRIPT_DIR/bdtool"
+  elif [[ -x "$SCRIPT_DIR/ptbd" ]]; then
+    menu_entry="$SCRIPT_DIR/ptbd"
+  else
+    warn "cannot find menu entry (bdtool/ptbd), skip auto menu launch"
+    return 0
+  fi
+
+  msg "自动进入菜单界面..." "Launching interactive menu..."
+  BDTOOL_NO_PROMPT=0 "$menu_entry" --lang "$BD_LANG" || warn "menu exited with non-zero status"
+}
+
+auto_launch_menu_after_install

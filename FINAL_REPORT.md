@@ -1,36 +1,50 @@
 # FINAL_REPORT
 
+## 变更目标
+
+实现“安装完成后自动跳转数字菜单界面”，并保证：
+- 仅在交互终端（TTY）自动进入菜单。
+- `--non-interactive` 或非 TTY 绝不进入菜单。
+- 菜单与帮助支持中英双语。
+
 ## 根因分析
 
-用户安装后看不到“可运行选项界面”的主要原因是：
-1. `install.sh` 安装的是旧入口（`bdtool.sh`），不是新菜单入口 `bdtool`。
-2. 安装后即使提示 `Next: bdtool doctor`，用户未必已在 PATH 中拿到正确入口。
-3. 无参执行时，非交互输入场景此前不会进入菜单，导致用户感知为“没有可操作选项”。
+用户“安装后看不到菜单/选项”来自两个问题：
+1. 安装器此前只提示 `Next: bdtool doctor`，未做安装成功后的菜单自动跳转。
+2. 入口脚本默认 `BDTOOL_NO_PROMPT=1`，会把无参数执行判定为非交互路径，导致只输出 help。
 
 ## 修复点
 
-1. 修复安装产物：
-- `install.sh` 改为安装完整 CLI 套件到安装目录：
-  - `bdtool`
-  - `bdtool.sh`
-  - `install.sh`
-  - `lib/ui.sh`
-  - `lib/i18n.sh`
-- 安装后立即 `command -v bdtool` 校验，失败即报错并给出 PATH 提示。
+1. `install.sh`：安装成功后自动拉起菜单
+- 新增 `auto_launch_menu_after_install`。
+- 条件：
+  - `AUTO_LAUNCH_MENU=1`（默认开启）
+  - 非 `--non-interactive`
+  - stdin 为 TTY
+- 启动逻辑：
+  - 优先 `command -v bdtool`
+  - 兜底 `./bdtool` 或 `./ptbd`
+  - 使用当前语言 `--lang <zh|en>`
+- 新增 `--non-interactive` 参数，明确禁止自动菜单。
 
-2. 修复入口体验：
-- `bdtool` 无参数：
-  - 交互终端：进入菜单。
-  - 管道输入（如 `printf "7\n" | bdtool`）：进入菜单并可自动退出，不阻塞。
-  - 其他非交互场景：输出 help 后退出。
+2. `bdtool`：数字菜单与策略
+- 无参数：
+  - TTY 且非 `--non-interactive` → 进入 `menu_loop`
+  - 非 TTY → 输出 help 并退出（退出码 0）
+- 菜单项（1-7）全部数字触发：
+  1) install
+  2) doctor
+  3) scan（无能力时 SKIP）
+  4) clean（危险操作，二次确认）
+  5) logs（默认 tail run.log）
+  6) switch language
+  7) quit
+- 输入规则：只接受 `1-7` 或 `q/Q`；非法输入输出红色 ERROR + HINT 并重试。
+- 保留子命令模式：`install/doctor/scan/clean/logs/--help`。
 
-3. 双语保持：
+3. 双语策略
 - `--lang zh|en` 强制语言。
-- 默认按 `LC_ALL/LANG` 自动识别；未设置默认中文。
-
-4. 子命令保持：
-- `install/doctor/scan/clean/logs/--help` 保持可用。
-- `clean` 保持危险操作二次确认，非交互必须 `--yes`。
+- 默认语言：`LC_ALL/LANG` 含 `zh` 用中文，否则英文；未设置默认中文。
 
 ## 改动文件清单
 
@@ -38,31 +52,27 @@
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
 
-备份文件：
+## 备份文件
+
 - `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool.bak`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
 
-## 复跑结果（真实执行）
+## 复测结果（真实执行）
 
 日志文件：
 - 统一日志：`./bdtool-output/logs/run.log`
-- 本次修复测试：`./bdtool-output/logs/auto-fix-entry.log`
+- 菜单拉起测试：`./bdtool-output/logs/menu-launch-test.log`
 
-| 步骤 | 命令 | 结果 |
+| 用例 | 命令 | 结果 |
 |---|---|---|
-| INSTALL | `env BDTOOL_NO_PROMPT=1 bash ./install.sh` | PASS |
-| CHECK | `command -v bdtool` | PASS (`/home/15sir/.local/bin/bdtool`) |
-| HELP | `bdtool --help` | PASS |
-| MENU_EXIT | `printf "7\n" \| bdtool` | PASS（进入菜单并退出） |
-| LOGS | `bdtool logs --tail 20` | PASS |
+| INSTALL_AUTO_MENU | `printf "7\n" \| script -qec 'bash ./install.sh' /dev/null` | PASS（安装后自动进入菜单并退出） |
+| MENU_DISPATCH_LOGS_QUIT | `printf "5\n7\n" \| script -qec 'bdtool --lang zh' /dev/null` | PASS（数字 5 执行 logs，随后 7 退出） |
+| NONTTY_POLICY | `printf "7\n" \| bdtool` | PASS（按策略输出 help 并退出） |
+| COMMAND_PATH | `command -v bdtool` | PASS |
+| HELP | `bdtool --help --lang zh` | PASS |
 | DOCTOR | `bdtool doctor` | PASS |
-
-## 兼容与迁移说明
-
-- 旧入口 `bdtool.sh` 仍可直接调用（能力未删除）。
-- 推荐统一入口：`bdtool`。
-- 若 `/usr/local/bin` 不可写，自动降级安装到 `~/.local/bin`，并自动尝试加入 PATH；若当前 shell 未生效，提示重新开终端或手动 `export PATH="$HOME/.local/bin:$PATH"`。
+| LOGS | `bdtool logs --tail 20` | PASS |
 
 ## 回滚命令
 
