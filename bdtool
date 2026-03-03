@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BDTOOL_ROOT="$ROOT_DIR"
+export BDTOOL_ROOT
+
+# shellcheck source=lib/ui.sh
+source "$ROOT_DIR/lib/ui.sh"
+# shellcheck source=lib/i18n.sh
+source "$ROOT_DIR/lib/i18n.sh"
+
+ensure_log_dir "$ROOT_DIR"
+setup_log_redirection "$ROOT_DIR"
+
+CLI_LANG_OVERRIDE=""
+if [[ $# -gt 0 ]]; then
+  idx=1
+  while [[ "$idx" -le "$#" ]]; do
+    arg="${!idx}"
+    if [[ "$arg" == "--lang" ]]; then
+      next=$((idx + 1))
+      if [[ "$next" -le "$#" ]]; then
+        CLI_LANG_OVERRIDE="${!next}"
+      fi
+      idx=$((idx + 2))
+      continue
+    elif [[ "$arg" == --lang=* ]]; then
+      CLI_LANG_OVERRIDE="${arg#*=}"
+    fi
+    idx=$((idx + 1))
+  done
+fi
+
+set_lang "$CLI_LANG_OVERRIDE"
+if ! i18n_normalize_lang "$LANG_CODE" >/dev/null 2>&1; then
+  set_lang "zh"
+fi
+
+trap 'error "$(t ERR_UNCAUGHT)"; error "$(t LOG_PATH): $BDTOOL_RUN_LOG"; if [[ "${SHOW_ERR_TAIL:-1}" == "1" ]]; then echo; tail -n 50 "$BDTOOL_RUN_LOG" 2>/dev/null || true; fi' ERR
+
+APP_VERSION="dev"
+if command -v git >/dev/null 2>&1; then
+  APP_VERSION="$(cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo dev)"
+fi
+GITHUB_URL="https://github.com/My15sir/PT-BDtool"
+
+show_banner() {
+  section "PT-BDtool"
+  echo " ____ ______   ____  ____           _ "
+  echo "|  _ \_   _| | __ )|  _ \ ___  ___| |"
+  echo "| |_) || |   |  _ \| |_) / _ \/ __| |"
+  echo "|  __/ | |   | |_) |  _ <  __/\__ \_|"
+  echo "|_|    |_|   |____/|_| \_\___||___(_)"
+  info "$(t APP_TITLE)"
+  info "$(t APP_SUBTITLE)"
+  info "Version: $APP_VERSION"
+  info "GitHub: $GITHUB_URL"
+}
+
+show_help() {
+  show_banner
+  hr
+  echo "$(t HELP_TITLE):"
+  echo "  bdtool [--lang zh|en]"
+  echo "  bdtool --help [--lang zh|en]"
+  echo "  bdtool install [--non-interactive] [--lang zh|en]"
+  echo "  bdtool doctor [--lang zh|en]"
+  echo "  bdtool scan [path] [--lang zh|en] [extra scan args]"
+  echo "  bdtool clean [--yes] [--lang zh|en]"
+  echo "  bdtool logs [--tail N] [--lang zh|en]"
+  echo
+  echo "$(t HELP_DESC)"
+  echo "$(t HELP_NONTTY_POLICY)"
+  echo
+  echo "$(t HELP_COMMANDS):"
+  echo "  install  - $(t MENU_1)"
+  echo "  doctor   - $(t MENU_2)"
+  echo "  scan     - $(t MENU_3)"
+  echo "  clean    - $(t MENU_4)"
+  echo "  logs     - $(t MENU_5)"
+  echo
+  echo "Options:"
+  echo "  --lang zh|en         $(t HELP_OPT_LANG)"
+  echo "  --non-interactive    $(t HELP_OPT_NONINT)"
+  echo "  --yes                $(t HELP_OPT_YES)"
+  echo "  --tail N             $(t HELP_OPT_TAIL)"
+  echo
+  echo "$(t HELP_EXAMPLES):"
+  echo "  ./bdtool"
+  echo "  ./bdtool --help --lang en"
+  echo "  ./bdtool install --non-interactive --lang zh"
+  echo "  ./bdtool doctor --lang en"
+  echo "  ./bdtool scan /data/videos --mode dry"
+  echo "  ./bdtool clean --yes"
+  echo "  ./bdtool logs --tail 30"
+}
+
+die_with_hint() {
+  error "$1"
+  hint "$(t HINT_USE_HELP)"
+  die "$(t LOG_PATH): $BDTOOL_RUN_LOG"
+}
+
+cmd_install() {
+  local non_interactive=0
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --non-interactive)
+        non_interactive=1
+        shift
+        ;;
+      --lang|--lang=*)
+        if [[ "$1" == "--lang" ]]; then
+          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+          set_lang "$2"
+          shift 2
+        else
+          set_lang "${1#*=}"
+          shift
+        fi
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$non_interactive" -eq 1 ]]; then
+    export BDTOOL_NO_PROMPT=1
+  fi
+
+  execute_with_spinner "$(t INSTALL_RUNNING)" "$ROOT_DIR/install.sh" "${args[@]}" || die "$(t INSTALL_RUNNING) failed"
+}
+
+cmd_doctor() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang|--lang=*)
+        if [[ "$1" == "--lang" ]]; then
+          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+          set_lang "$2"
+          shift 2
+        else
+          set_lang "${1#*=}"
+          shift
+        fi
+        ;;
+      *)
+        die_with_hint "$1"
+        ;;
+    esac
+  done
+  execute_with_spinner "$(t DOCTOR_RUNNING)" "$ROOT_DIR/bdtool.sh" doctor || die "$(t DOCTOR_RUNNING) failed"
+}
+
+cmd_scan() {
+  local scan_path=""
+  local args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang|--lang=*)
+        if [[ "$1" == "--lang" ]]; then
+          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+          set_lang "$2"
+          shift 2
+        else
+          set_lang "${1#*=}"
+          shift
+        fi
+        ;;
+      -*)
+        args+=("$1")
+        if [[ $# -ge 2 && "${2:0:1}" != "-" ]]; then
+          args+=("$2")
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      *)
+        if [[ -z "$scan_path" ]]; then
+          scan_path="$1"
+        else
+          args+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$scan_path" ]]; then
+    if [[ -t 1 && "${BDTOOL_NO_PROMPT:-0}" != "1" ]]; then
+      scan_path="$(prompt_with_default "$(t SCAN_PATH_PROMPT)" ".")"
+    else
+      scan_path="."
+    fi
+  fi
+
+  validate_nonempty "$scan_path" || die_with_hint "$(t ERR_SCAN_PATH_EMPTY)"
+  execute_with_spinner "$(t SCAN_RUNNING)" "$ROOT_DIR/bdtool.sh" scan "$scan_path" "${args[@]}" || die "$(t SCAN_RUNNING) failed"
+}
+
+cmd_clean() {
+  local yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes)
+        yes=1
+        shift
+        ;;
+      --lang|--lang=*)
+        if [[ "$1" == "--lang" ]]; then
+          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+          set_lang "$2"
+          shift 2
+        else
+          set_lang "${1#*=}"
+          shift
+        fi
+        ;;
+      *)
+        die_with_hint "$1"
+        ;;
+    esac
+  done
+
+  if [[ "$yes" -ne 1 ]]; then
+    if [[ "${BDTOOL_NO_PROMPT:-0}" == "1" || ! -t 1 ]]; then
+      hint "$(t HINT_LOG): $BDTOOL_RUN_LOG"
+      die "$(t ERR_NONINT_NEED_YES)"
+    fi
+    confirm "$(t CONFIRM_CLEAN_1)" "N" || { warn "$(t MENU_BYE)"; return 0; }
+    confirm "$(t CONFIRM_CLEAN_2)" "N" || { warn "$(t MENU_BYE)"; return 0; }
+  fi
+
+  execute_with_spinner "$(t CLEAN_RUNNING)" "$ROOT_DIR/bdtool.sh" clean || die "$(t CLEAN_RUNNING) failed"
+}
+
+cmd_logs() {
+  local tail_n=50
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --tail)
+        [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+        tail_n="$2"
+        shift 2
+        ;;
+      --tail=*)
+        tail_n="${1#*=}"
+        shift
+        ;;
+      --lang|--lang=*)
+        if [[ "$1" == "--lang" ]]; then
+          [[ $# -ge 2 ]] || die_with_hint "$(t ERR_NEED_VALUE)"
+          set_lang "$2"
+          shift 2
+        else
+          set_lang "${1#*=}"
+          shift
+        fi
+        ;;
+      *)
+        die_with_hint "$1"
+        ;;
+    esac
+  done
+
+  validate_int_range "$tail_n" 1 10000 || die_with_hint "$(t ERR_LOG_TAIL_INT)"
+  section "$(t LOGS_RUNNING)"
+  run_cmd_logged "tail run log" tail -n "$tail_n" "$BDTOOL_RUN_LOG" || die "$(t LOGS_RUNNING) failed"
+}
+
+switch_language() {
+  if [[ "$LANG_CODE" == "zh" ]]; then
+    set_lang "en"
+    success "$(t MENU_SWITCHED_EN)"
+  else
+    set_lang "zh"
+    success "$(t MENU_SWITCHED_ZH)"
+  fi
+}
+
+menu_loop() {
+  while true; do
+    show_banner
+    hr
+    echo "$(t MENU_1)"
+    echo "$(t MENU_2)"
+    echo "$(t MENU_3)"
+    echo "$(t MENU_4)"
+    echo "$(t MENU_5)"
+    echo "$(t MENU_6)"
+    echo "$(t MENU_7)"
+    hr
+
+    local choice
+    if [[ -t 0 ]]; then
+      read -r -p "$(t MENU_PROMPT): " choice || true
+    else
+      IFS= read -r choice || true
+    fi
+
+    case "$choice" in
+      1) cmd_install --non-interactive ;;
+      2) cmd_doctor ;;
+      3) cmd_scan . --mode dry ;;
+      4) cmd_clean ;;
+      5) cmd_logs --tail 50 ;;
+      6) switch_language ;;
+      7|q|Q) info "$(t MENU_BYE)"; return 0 ;;
+      *) error "$(t MENU_INVALID)" ;;
+    esac
+  done
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    if [[ -t 1 ]]; then
+      menu_loop
+      return 0
+    fi
+    info "$(t MSG_NONTTY_HELP)"
+    show_help
+    return 0
+  fi
+
+  local cmd="$1"
+  shift || true
+
+  case "$cmd" in
+    -h|--help|help)
+      show_help
+      ;;
+    install)
+      cmd_install "$@"
+      ;;
+    doctor)
+      cmd_doctor "$@"
+      ;;
+    scan)
+      cmd_scan "$@"
+      ;;
+    clean)
+      cmd_clean "$@"
+      ;;
+    logs)
+      cmd_logs "$@"
+      ;;
+    --lang|--lang=*)
+      show_help
+      ;;
+    *)
+      die_with_hint "unknown command: $cmd"
+      ;;
+  esac
+}
+
+main "$@"

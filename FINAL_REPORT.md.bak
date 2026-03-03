@@ -69,9 +69,9 @@
 
 | 用例 | 命令 | 结果 |
 |---|---|---|
-| RETEST1 | `timeout 300 bash install.sh --dry-run` | PASS (RC=0) |
-| RETEST2 | `timeout 300 DEMO=1 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run` | PASS (RC=0) |
-| RETEST3 | `timeout 300 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run --password short` | PASS（按预期失败，RC=1，输出 ERROR+HINT+日志路径） |
+| RUN1 | `timeout 300 bash install.sh --dry-run` | PASS (RC=0) |
+| RUN2 | `timeout 300 DEMO=1 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run` | PASS (RC=0) |
+| RUN3 | `timeout 300 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run --password short` | PASS（按预期失败，RC=1，输出 ERROR+HINT+日志路径） |
 
 关键演示片段（来自 `ui-error-demo.log`）：
 

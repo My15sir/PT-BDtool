@@ -1,99 +1,92 @@
 # FINAL_REPORT
 
-## 问题原因
+## 1) 能力保持与产品化目标
 
-现象：安装与参数校验阶段缺少统一错误态体验，输入校验失败时提示不统一，且无人值守场景容易出现流程中断风险。
+本次改造在不删除能力集合前提下，完成了：
+- 新手模式：`bdtool` 无参数菜单入口（交互终端）。
+- 老手模式：`bdtool install/doctor/scan/clean/logs` 子命令。
+- 双语：菜单、帮助、错误提示支持 `zh/en`，支持 `--lang` 强制切换。
+- 统一 UI：颜色、section、spinner、错误态、日志路径提示。
+- 统一日志：所有 stdout/stderr 追加到 `./bdtool-output/logs/run.log`。
 
-目标对齐：参考 `Auto-Seedbox-PT/auto_seedbox_pt.sh` 的交互风格，统一实现 `[ERROR]/[WARN]/[INFO]/[HINT]` 分级输出、可恢复错误重试、不可恢复错误统一退出并指向日志。
+保留能力：
+- install（调用 `install.sh`）
+- doctor（调用 `bdtool.sh doctor`）
+- scan（调用 `bdtool.sh scan ...`）
+- clean（调用 `bdtool.sh clean`）
 
-## 修复方案
+## 2) 无参数策略（按要求）
 
-1. 重构 `lib/ui.sh` 为统一 UI 层。
-2. 增加错误态组件与提示组件：`error/warn/info/success/hint/error_box`。
-3. 增加可重试输入函数：
-   - `prompt_secret_with_rules(var_name, prompt, min_len, max_retry, allow_empty)`
-   - `prompt_with_default_and_validate(var_name, prompt, default, validator_fn, max_retry)`
-4. 保持兼容：保留 `log_info/log_warn/log_err/log_success` 别名，旧调用不失效。
-5. 统一日志：`setup_log_redirection` + `run_cmd_logged` + `execute_with_spinner`，所有 stdout/stderr 追加到 `./bdtool-output/logs/run.log`。
-6. 不可恢复错误统一 `die`：打印错误并提示日志路径。
-7. `install.sh` 接入：
-   - 新增 `ERR trap` 未捕捉异常提示。
-   - 新增密码输入校验流程，支持无人值守默认值与参数覆盖。
-   - 新增 `DEMO=1` 演示模式：自动模拟一次短密码失败后重试成功。
+- 无参数且交互终端：显示菜单。
+- 无参数且非交互终端：输出 help 并退出。
 
-## 错误态覆盖点
+判定实现：以终端交互能力为准（无可交互输入时不进入菜单，避免阻塞）。
 
-- 密码长度不足（可恢复/可重试）：
-  - 错误文案：`[ERROR] 安全性不足：密码长度必须 ≥ 12 位！`
-  - 修复提示：`[HINT] 请重新输入，建议使用 16 位以上。`
-  - 自动重试：最多 `max_retry` 次。
-- 参数直传密码不合法（不可恢复）：
-  - `--password short` 直接报错并 `die` 退出。
-  - 明确提示日志路径：`./bdtool-output/logs/run.log`。
-- 未捕捉异常（不可恢复）：
-  - `trap ERR` 统一输出错误与日志路径（可控 tail 日志）。
+## 3) 旧用法 -> 新用法迁移表
 
-## 可重试输入函数说明
-
-### prompt_secret_with_rules
-
-- 隐藏输入（TTY 下 `read -s`）。
-- 支持无人值守：`BDTOOL_NO_PROMPT=1` 自动选择默认值或环境变量。
-- 支持重试队列（用于 DEMO 自动化）：`PROMPT_INPUTS_<VAR>`。
-- 长度不足时输出 `ERROR + HINT` 并重试。
-- 超过重试上限执行 `die("多次输入失败，已退出。")`。
-
-### prompt_with_default_and_validate
-
-- 支持默认值。
-- 支持验证函数注入（返回 0 为通过）。
-- 校验失败输出 `ERROR + HINT` 并重试。
-- 超过重试上限统一 `die`。
-
-## 改动/新增文件清单
-
-- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
-- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
-
-备份文件：
-- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh.bak`
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
-- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
-
-## 复跑测试结果
-
-测试日志：
-- 运行日志：`/media/15sir/DataHub/Github/PT-BDtool/bdtool-output/logs/run.log`
-- 演示日志：`/media/15sir/DataHub/Github/PT-BDtool/bdtool-output/logs/ui-error-demo.log`
-
-| 用例 | 命令 | 结果 |
+| 旧用法 | 新用法 | 说明 |
 |---|---|---|
-| RUN1 | `timeout 300 bash install.sh --dry-run` | PASS (RC=0) |
-| RUN2 | `timeout 300 DEMO=1 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run` | PASS (RC=0) |
-| RUN3 | `timeout 300 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run --password short` | PASS（按预期失败，RC=1，输出 ERROR+HINT+日志路径） |
+| `./ptbd install` | `./bdtool install` | 旧入口 `ptbd` 保留为兼容转发 |
+| `./ptbd doctor` | `./bdtool doctor` | 等价 |
+| `./ptbd scan /path` | `./bdtool scan /path` | 等价，支持 `--lang` |
+| `./ptbd clean` | `./bdtool clean` | 新增双重确认；无人值守需 `--yes` |
+| `./bdtool.sh doctor` | `./bdtool doctor` | 推荐使用新入口 |
+| `./bdtool.sh scan /path ...` | `./bdtool scan /path ...` | 新入口做 UI/语言调度，业务仍复用 `bdtool.sh` |
+| `./bdtool.sh clean` | `./bdtool clean` | 新入口增加危险确认 |
 
-关键演示片段（来自 `ui-error-demo.log`）：
+## 4) i18n 设计
 
-```text
-[INFO] DEMO=1：将自动演示一次短密码失败并重试成功。
-[ERROR] 安全性不足：密码长度必须 ≥ 12 位！
-[HINT] 请重新输入，建议使用 16 位以上。
-[SUCCESS] DEMO：密码重试流程验证通过。
-```
+新增 `lib/i18n.sh`：
+- `LANG_CODE`：`zh/en`
+- `set_lang()`：解析 `--lang` / `BDTOOL_LANG` / `LC_ALL$LANG`（含 zh 用中文，否则英文；未设置默认中文）
+- `t(KEY)`：文案映射
 
-## 回滚命令
+覆盖范围：
+- 标题、帮助、菜单项、提示、错误、确认、日志提示。
+
+## 5) 变更文件清单
+
+- 新增：`/media/15sir/DataHub/Github/PT-BDtool/lib/i18n.sh`
+- 新增：`/media/15sir/DataHub/Github/PT-BDtool/bdtool`
+- 修改：`/media/15sir/DataHub/Github/PT-BDtool/ptbd`
+- 修改：`/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
+
+备份：
+- `ptbd.bak`
+- `FINAL_REPORT.md.bak`
+
+## 6) 自测结果（真实执行）
+
+测试日志文件：
+- `./bdtool-output/logs/cli-menu-test.log`
+- 统一运行日志：`./bdtool-output/logs/run.log`
+
+| 用例 | 命令 | 结果 | 备注 |
+|---|---|---|---|
+| 1 | `./bdtool --help` | PASS | 英文环境默认英文帮助 |
+| 2 | `./bdtool --help --lang en` | PASS | 强制英文生效 |
+| 3 | `printf "6\n6\n7\n" | ./bdtool` | SKIP（策略命中） | 非交互输入场景按策略输出 help 并退出，不进入菜单 |
+| 4 | `printf "2\n7\n" | ./bdtool --lang en` | SKIP（策略命中） | 同上，未进入菜单，因此不执行 doctor |
+| 5 | `./bdtool logs --tail 20` | PASS | 正常输出日志 tail |
+
+## 7) 已知差异
+
+- 为避免无人值守阻塞，无参数但非交互输入时，严格走 help 退出策略，不消费管道输入菜单项。
+
+## 8) 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-cp -f lib/ui.sh.bak lib/ui.sh
-cp -f install.sh.bak install.sh
+cp -f ptbd.bak ptbd
 cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
+rm -f bdtool
+rm -f lib/i18n.sh
 ```
 
-可选 git 回滚：
+可选 git 回滚（如已纳入版本控制）：
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- lib/ui.sh install.sh FINAL_REPORT.md
+git checkout -- ptbd FINAL_REPORT.md
+git clean -f bdtool lib/i18n.sh
 ```
