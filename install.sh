@@ -88,6 +88,7 @@ detect_lang() {
   fi
 
   if [[ -t 0 ]]; then
+    echo "[bdtool-install] Waiting for language selection... / 正在等待选择语言..."
     prompt_lang
   else
     detect_default_lang
