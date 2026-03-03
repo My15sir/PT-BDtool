@@ -337,6 +337,7 @@ bt_usage() {
 bdtool <path> [options]
 bdtool scan <path> --out <dir> [options]  # 兼容入口
 bdtool doctor
+bdtool status  Check installation status
 bdtool install
 bdtool clean
 
@@ -376,6 +377,71 @@ bt_cmd_doctor() {
   else
     echo "MISS: BDInfo (安装提示：运行 install.sh，Linux x64 会自动安装 BDInfoCLI-ng)"
   fi
+}
+
+bt_try_version_cmd() {
+  local out
+  if out="$("$@" 2>/dev/null)"; then
+    out="$(echo "$out" | head -n 1)"
+    [[ -n "$out" ]] && { echo "$out"; return 0; }
+  fi
+  return 1
+}
+
+bt_cmd_status() {
+  local locale="${LC_ALL:-${LANG:-}}"
+  local is_zh=0
+  [[ "$locale" == *zh* || "$locale" == *ZH* ]] && is_zh=1
+
+  local install_path
+  install_path="$(command -v bdtool 2>/dev/null || true)"
+  [[ -n "$install_path" ]] || install_path="$0"
+
+  local version="unknown"
+  if bt_try_version_cmd bdtool --version >/dev/null 2>&1; then
+    version="$(bt_try_version_cmd bdtool --version)"
+  elif bt_try_version_cmd "$0" --version >/dev/null 2>&1; then
+    version="$(bt_try_version_cmd "$0" --version)"
+  elif command -v git >/dev/null 2>&1 && git rev-parse --short HEAD >/dev/null 2>&1; then
+    version="$(git rev-parse --short HEAD)"
+  fi
+
+  if [[ "$is_zh" == "1" ]]; then
+    echo "[bdtool] 安装路径：$install_path"
+    echo "[bdtool] 版本：$version"
+    echo "[bdtool] 依赖检查："
+  else
+    echo "[bdtool] Install path: $install_path"
+    echo "[bdtool] Version: $version"
+    echo "[bdtool] Dependency check:"
+  fi
+
+  local fail=0
+  local dep
+  for dep in ffmpeg ffprobe mediainfo BDInfo; do
+    if command -v "$dep" >/dev/null 2>&1; then
+      echo "  OK: $dep"
+    else
+      echo "  MISS: $dep"
+      fail=1
+    fi
+  done
+
+  if [[ "$is_zh" == "1" ]]; then
+    if [[ "$fail" -eq 0 ]]; then
+      echo "[bdtool] 结果：PASS"
+    else
+      echo "[bdtool] 结果：FAIL"
+    fi
+  else
+    if [[ "$fail" -eq 0 ]]; then
+      echo "[bdtool] Result: PASS"
+    else
+      echo "[bdtool] Result: FAIL"
+    fi
+  fi
+
+  return "$fail"
 }
 
 bt_cmd_install() {
@@ -507,6 +573,10 @@ bt_main() {
     doctor)
       shift
       bt_cmd_doctor
+      ;;
+    status)
+      shift
+      bt_cmd_status
       ;;
     install)
       shift
