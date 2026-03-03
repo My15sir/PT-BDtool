@@ -12,7 +12,7 @@ if [[ -t 2 ]]; then
   UI_BLUE='\033[0;34m'
   UI_CYAN='\033[0;36m'
   UI_GRAY='\033[0;90m'
-  if [[ "${TERM:-}" != "" ]]; then
+  if command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 256 ]]; then
     UI_BEIGE='\033[38;5;223m'
   else
     UI_BEIGE='\033[0;33m'
@@ -34,7 +34,9 @@ warn() { printf "%b[WARN]%b %s\n" "$UI_YELLOW" "$UI_NC" "$*" >&2; }
 info() { printf "%b[INFO]%b %s\n" "$UI_CYAN" "$UI_NC" "$*" >&2; }
 success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
 hint() { printf "%b[HINT]%b %s\n" "$UI_GRAY" "$UI_NC" "$*" >&2; }
-menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
+
+color_menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
+menu_option() { color_menu_option "$@"; }
 
 # Backward-compatible aliases.
 log_info() { info "$@"; }
@@ -152,9 +154,11 @@ ensure_log_dir() {
   BDTOOL_DATA_DIR="$(resolve_data_dir)"
   BDTOOL_LOG_DIR="$BDTOOL_DATA_DIR/logs"
   BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"
+  BDTOOL_UX_LOG="$BDTOOL_LOG_DIR/ui.log"
 
   mkdir -p "$BDTOOL_LOG_DIR"
   touch "$BDTOOL_RUN_LOG"
+  touch "$BDTOOL_UX_LOG"
 }
 
 setup_log_redirection() {

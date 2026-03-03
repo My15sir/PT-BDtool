@@ -5,8 +5,7 @@
 LANG_CODE="${LANG_CODE:-}"
 
 i18n_normalize_lang() {
-  local raw
-  raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  local raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
   case "$raw" in
     zh|zh_cn|zh-cn|cn|chinese) echo "zh" ;;
     en|en_us|en-us|english) echo "en" ;;
@@ -176,7 +175,7 @@ t() {
     en:ACTION_DONE_SUFFIX) echo " completed" ;;
 
     zh:ACTION_FAIL_SUFFIX) echo "失败，详情见：" ;;
-    en:ACTION_FAIL_SUFFIX) echo " failed, see: " ;;
+    en:ACTION_FAIL_SUFFIX) echo "failed, see: " ;;
 
     zh:PRESS_ENTER_RETURN) echo "按回车返回菜单" ;;
     en:PRESS_ENTER_RETURN) echo "Press Enter to return" ;;
