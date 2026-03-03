@@ -1,86 +1,94 @@
 # FINAL_REPORT
 
-## 根因分析
+## 本次改动点（对应 A-F）
 
-1. 菜单失败后掉回 shell 的根因：
-- 菜单项执行直接调用 `cmd_scan/cmd_doctor/...`，这些函数内部失败时会 `die`，导致整个 `bdtool` 进程退出。
-- 进程退出后用户继续输入 `4/5/6` 就变成 shell 命令，从而出现 `command not found`。
+### A) 菜单选项米黄色（真正生效）
+- 在 `lib/ui.sh` 增加菜单颜色检测：
+  - 终端支持 256 色：使用 `\033[38;5;223m`
+  - 不支持时回退：`\033[0;33m`
+- 新增函数 `color_menu_option()`，并在 `bdtool` 菜单渲染中只给选项行着色。
+- 保持分级日志颜色不变：`success` 绿色、`error` 红色、`warn` 黄色、`info` 青色。
 
-2. 日志路径错到 `/usr/local/bin/bdtool-output` 的根因：
-- 旧逻辑把 `BDTOOL_ROOT` 设为入口脚本所在目录；安装后入口位于 `/usr/local/bin` 或 `~/.local/bin`，于是日志目录被拼到该路径下。
+### B) 菜单项单语显示
+- 保留双语字典（`lib/i18n.sh`），菜单渲染只取当前 `LANG_CODE`。
+- 菜单项从双语并列改为单语：
+  - `zh`：`1) 一键安装`
+  - `en`：`1) One-click install`
 
-## 修复点
+### C) 交互后屏幕仅一句结果，细节写入日志
+- 在 `bdtool` 中统一动作包装器 `run_action()`：
+  - 屏幕显示 `section(label)`。
+  - 执行过程 stdout/stderr 全部重定向到 `UX_LOG`（`$DATA_DIR/logs/ui.log`）。
+  - 成功仅一行：如 `【成功】环境体检已完成` / `Doctor completed`。
+  - 失败仅一行：如 `【失败】扫描/生成失败，详情见：.../ui.log`。
+  - 然后显示 `按回车返回菜单 / Press Enter to return` 并回菜单。
+- 细节（错误堆栈、扫描参数、子命令输出）全部进入 `ui.log`。
 
-### A) 菜单循环“失败不退出”
-
+### D) 失败不退出菜单
 - 菜单循环保持 `while true`，仅在 `7/q/Q` 时退出。
-- 新增 `run_menu_action`：
-  - 通过子 shell 执行菜单动作并捕获 `rc`。
-  - `rc != 0` 时打印 `error + hint + RUN_LOG`。
-  - 无论成功失败都执行 `menu_pause`（按回车返回菜单）。
-- 删除/避免菜单层透传非零返回码退出进程。
-- 去除安装器里类似 `menu exited with non-zero status` 的告警输出。
+- 子动作失败不会退出菜单主进程；不会掉回 shell。
+- 已避免出现 `menu exited with non-zero status` 这类误导提示。
 
-### B) 数据目录与日志路径修复
+### E) 统一当前语言成功/失败说明
+- 成功/失败文案由 `i18n` 的 `t(KEY)` 提供：
+  - `ACTION_SUCCESS_PREFIX / ACTION_DONE_SUFFIX`
+  - `ACTION_FAIL_PREFIX / ACTION_FAIL_SUFFIX`
+- 中文示例：
+  - 成功：`【成功】环境体检已完成`
+  - 失败：`【失败】扫描/生成失败，详情见：.../ui.log`
+- 英文示例：
+  - 成功：`Doctor completed`
+  - 失败：`Scan failed, see: .../ui.log`
 
-在 `lib/ui.sh` 新增 `resolve_data_dir()` 策略：
-1. 若设置 `BDTOOL_DATA_DIR`，优先使用。
-2. 若 `/opt/PT-BDtool` 存在且可写（或 root），用 `/opt/PT-BDtool/bdtool-output`。
-3. 否则用 `$HOME/.local/share/pt-bdtool/bdtool-output`。
-4. 再兜底 `/tmp/pt-bdtool/bdtool-output`。
+### F) 其他 bug 修复
+1. 菜单重绘统一：每轮都使用同一 banner + 框线 + 选项渲染。
+2. `logs` 选项：默认 `tail -n 80`，并把完整日志路径写入 `ui.log`。
+3. `scan` 不可用时：显示 `扫描功能未实现，已跳过。/ Scan is not available, skipped.`，并回菜单。
+4. 路径策略统一：日志目录不再基于 `/usr/local/bin`，改为 `resolve_data_dir()` 可写数据目录策略。
 
-`ensure_log_dir()` 统一设置：
-- `BDTOOL_LOG_DIR="$BDTOOL_DATA_DIR/logs"`
-- `BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"`
+## 菜单颜色实现与 fallback 说明
+- 实现位置：`lib/ui.sh`。
+- 逻辑：
+  - `tput colors >= 256` → 菜单选项使用 `38;5;223`（米黄色）
+  - 否则使用 `33`（黄色）
+- 人工验证方法：
+  - 运行：`printf "7\n" | script -qec './bdtool --lang zh' /dev/null | cat -v`
+  - 输出中可见 `^[ [38;5;223m` ANSI 片段即为生效。
 
-确保日志提示不再出现 `/usr/local/bin/bdtool-output/...`。
-
-### C) 米黄色菜单主题
-
-在 `lib/ui.sh` 新增米黄色：
-- 优先 256 色：`\033[38;5;223m`
-- fallback：`\033[33m`
-
-新增 `menu_option()` 并用于菜单 1~7 行显示。
-
-### D) install 自动进入菜单
-
-- 仅在交互场景自动跳转（`AUTO_LAUNCH_MENU=1` 且非 `--non-interactive` 且 stdin 为 TTY）。
-- 启动命令不再因菜单返回码打印误导性 WARN。
+## 屏幕输出最小化策略
+- 菜单动作执行时：
+  - 屏幕只显示阶段标题 + 一句成功/失败 + 返回提示。
+  - 详细过程写入：`$DATA_DIR/logs/ui.log`。
+- 全局统一运行日志仍追加到：`$DATA_DIR/logs/run.log`。
 
 ## 改动文件清单
-
 - `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/i18n.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/bdtool`
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
-
-## 备份文件
-
-- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh.bak`
-- `/media/15sir/DataHub/Github/PT-BDtool/bdtool.bak`
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
-- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
 
 ## 复测结果
 
-日志文件：
-- `run.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/run.log`
-- `menu-loop-test.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/menu-loop-test.log`
+日志路径：
+- `RUN_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/run.log`
+- `UX_LOG`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ui.log`
+- `ux-regression.log`: `/home/15sir/.local/share/pt-bdtool/bdtool-output/logs/ux-regression.log`
 
-| 用例 | 命令 | 结果 |
-|---|---|---|
-| 菜单失败回菜单 | `printf "3\n\n7\n" \| bdtool --lang zh` | PASS（scan 失败后显示 error+hint，回车后返回菜单，再 7 正常退出） |
-| 菜单成功回菜单 | `printf "2\n\n7\n" \| bdtool --lang zh` | PASS（doctor 成功后回车返回菜单，再 7 退出） |
-| 安装后入口可用 | `env BDTOOL_NO_PROMPT=1 AUTO_LAUNCH_MENU=0 bash ./install.sh` | PASS |
+| 用例 | 命令 | 结果 | 说明 |
+|---|---|---|---|
+| 菜单米黄色 ANSI 校验 | `printf "7\n" \| script -qec './bdtool --lang zh' /dev/null \| cat -v` | PASS | 输出包含 `\x1b[38;5;223m` |
+| 中文 doctor 一句结果 | `printf "2\n\n7\n" \| ./bdtool --lang zh` | PASS | 动作后仅一行成功说明 |
+| 中文 scan 失败不退菜单 | `printf "3\n\n7\n" \| ./bdtool --lang zh` | PASS | 失败后返回菜单，未掉回 shell |
+| 中文 logs 后回菜单 | `printf "5\n\n7\n" \| ./bdtool --lang zh` | PASS | tail 后回菜单 |
+| 英文 doctor 一句结果 | `printf "2\n\n7\n" \| ./bdtool --lang en` | PASS | `Doctor completed` |
 
 ## 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
 cp -f lib/ui.sh.bak lib/ui.sh
+cp -f lib/i18n.sh.bak lib/i18n.sh
 cp -f bdtool.bak bdtool
-cp -f install.sh.bak install.sh
 cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 ```
 
@@ -88,5 +96,5 @@ cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- lib/ui.sh bdtool install.sh FINAL_REPORT.md
+git checkout -- lib/ui.sh lib/i18n.sh bdtool FINAL_REPORT.md
 ```

@@ -34,7 +34,9 @@ warn() { printf "%b[WARN]%b %s\n" "$UI_YELLOW" "$UI_NC" "$*" >&2; }
 info() { printf "%b[INFO]%b %s\n" "$UI_CYAN" "$UI_NC" "$*" >&2; }
 success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
 hint() { printf "%b[HINT]%b %s\n" "$UI_GRAY" "$UI_NC" "$*" >&2; }
-menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
+
+color_menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
+menu_option() { color_menu_option "$@"; }
 
 # Backward-compatible aliases.
 log_info() { info "$@"; }

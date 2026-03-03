@@ -2,7 +2,7 @@
 
 # i18n helpers for PT-BDtool CLI.
 
-LANG_CODE="${LANG_CODE:-}"
+LANG_CODE="${LANG_CODE:-zh}"
 
 i18n_normalize_lang() {
   local raw
@@ -14,28 +14,23 @@ i18n_normalize_lang() {
   esac
 }
 
-i18n_detect_lang() {
-  local locale="${LC_ALL:-${LANG:-}}"
-  if [[ -z "$locale" ]]; then
-    echo "zh"
-  elif [[ "$locale" == *zh* || "$locale" == *ZH* ]]; then
-    echo "zh"
-  else
-    echo "en"
-  fi
-}
-
 set_lang() {
   local candidate="${1:-}"
+  local resolved=""
+
   if [[ -n "$candidate" ]]; then
-    LANG_CODE="$(i18n_normalize_lang "$candidate" 2>/dev/null || true)"
+    resolved="$(i18n_normalize_lang "$candidate" 2>/dev/null || true)"
+  elif [[ -n "${LANG_CODE:-}" ]]; then
+    resolved="$(i18n_normalize_lang "$LANG_CODE" 2>/dev/null || true)"
+  elif [[ -n "${BDTOOL_LANG:-}" ]]; then
+    resolved="$(i18n_normalize_lang "$BDTOOL_LANG" 2>/dev/null || true)"
   fi
-  if [[ -z "$LANG_CODE" && -n "${BDTOOL_LANG:-}" ]]; then
-    LANG_CODE="$(i18n_normalize_lang "$BDTOOL_LANG" 2>/dev/null || true)"
+
+  if [[ -z "$resolved" ]]; then
+    resolved="zh"
   fi
-  if [[ -z "$LANG_CODE" ]]; then
-    LANG_CODE="$(i18n_detect_lang)"
-  fi
+
+  LANG_CODE="$resolved"
   export LANG_CODE
   export BDTOOL_LANG="$LANG_CODE"
 }
@@ -49,6 +44,12 @@ t() {
     zh:APP_SUBTITLE) echo "简洁稳定的命令行工具" ;;
     en:APP_SUBTITLE) echo "Simple and stable command line tool" ;;
 
+    zh:VERSION_LABEL) echo "版本" ;;
+    en:VERSION_LABEL) echo "Version" ;;
+
+    zh:GITHUB_LABEL) echo "项目地址" ;;
+    en:GITHUB_LABEL) echo "GitHub" ;;
+
     zh:HELP_TITLE) echo "用法" ;;
     en:HELP_TITLE) echo "Usage" ;;
 
@@ -60,9 +61,6 @@ t() {
 
     zh:HELP_COMMANDS) echo "子命令" ;;
     en:HELP_COMMANDS) echo "Commands" ;;
-
-    zh:HELP_EXAMPLES) echo "示例" ;;
-    en:HELP_EXAMPLES) echo "Examples" ;;
 
     zh:HELP_OPT_LANG) echo "强制语言（zh/en）" ;;
     en:HELP_OPT_LANG) echo "Force language (zh/en)" ;;
@@ -124,14 +122,8 @@ t() {
     zh:ERR_NONINT_NEED_YES) echo "无人值守 clean 必须显式传入 --yes。" ;;
     en:ERR_NONINT_NEED_YES) echo "Non-interactive clean requires explicit --yes." ;;
 
-    zh:ERR_SCAN_PATH_EMPTY) echo "扫描路径不能为空。" ;;
-    en:ERR_SCAN_PATH_EMPTY) echo "Scan path must not be empty." ;;
-
     zh:ERR_LOG_TAIL_INT) echo "--tail 必须是正整数。" ;;
     en:ERR_LOG_TAIL_INT) echo "--tail must be a positive integer." ;;
-
-    zh:HINT_LOG) echo "请查看日志" ;;
-    en:HINT_LOG) echo "See logs" ;;
 
     zh:HINT_USE_HELP) echo "可使用 --help 查看完整用法。" ;;
     en:HINT_USE_HELP) echo "Use --help for full usage." ;;
@@ -157,9 +149,6 @@ t() {
     zh:LOGS_RUNNING) echo "查看日志" ;;
     en:LOGS_RUNNING) echo "View logs" ;;
 
-    zh:SCAN_PATH_PROMPT) echo "请输入扫描路径" ;;
-    en:SCAN_PATH_PROMPT) echo "Enter scan path" ;;
-
     zh:MSG_NONTTY_HELP) echo "检测到非交互终端，显示帮助后退出。" ;;
     en:MSG_NONTTY_HELP) echo "Non-interactive terminal detected, showing help and exiting." ;;
 
@@ -181,8 +170,26 @@ t() {
     zh:PRESS_ENTER_RETURN) echo "按回车返回菜单" ;;
     en:PRESS_ENTER_RETURN) echo "Press Enter to return" ;;
 
-    zh:UX_LOG_PATH) echo "交互日志" ;;
-    en:UX_LOG_PATH) echo "UX log" ;;
+    zh:SCAN_MENU_TITLE) echo "扫描目录选择" ;;
+    en:SCAN_MENU_TITLE) echo "Select scan directory" ;;
+
+    zh:SCAN_MENU_BACK) echo "0) 返回上一级" ;;
+    en:SCAN_MENU_BACK) echo "0) Back" ;;
+
+    zh:SCAN_MENU_PROMPT) echo "请选择扫描目录编号" ;;
+    en:SCAN_MENU_PROMPT) echo "Select directory number" ;;
+
+    zh:SCAN_MENU_NO_DIR) echo "没有可用扫描目录，已返回主菜单。" ;;
+    en:SCAN_MENU_NO_DIR) echo "No available scan directories. Back to menu." ;;
+
+    zh:SCAN_MENU_INVALID) echo "目录选项无效，请重新输入。" ;;
+    en:SCAN_MENU_INVALID) echo "Invalid directory option. Try again." ;;
+
+    zh:SCAN_MENU_SELECTED) echo "已选择目录：" ;;
+    en:SCAN_MENU_SELECTED) echo "Selected directory: " ;;
+
+    zh:LOGS_CAPTURED) echo "最近日志已写入交互日志。" ;;
+    en:LOGS_CAPTURED) echo "Recent logs written to UI log." ;;
 
     *) echo "$key" ;;
   esac

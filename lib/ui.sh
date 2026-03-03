@@ -12,11 +12,13 @@ if [[ -t 2 ]]; then
   UI_BLUE='\033[0;34m'
   UI_CYAN='\033[0;36m'
   UI_GRAY='\033[0;90m'
+
   if command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 256 ]]; then
-    UI_BEIGE='\033[38;5;223m'
+    MENU_OPT_COLOR='\033[38;5;223m'
   else
-    UI_BEIGE='\033[0;33m'
+    MENU_OPT_COLOR='\033[0;33m'
   fi
+
   UI_NC='\033[0m'
 else
   UI_RED=''
@@ -25,7 +27,7 @@ else
   UI_BLUE=''
   UI_CYAN=''
   UI_GRAY=''
-  UI_BEIGE=''
+  MENU_OPT_COLOR=''
   UI_NC=''
 fi
 
@@ -35,7 +37,23 @@ info() { printf "%b[INFO]%b %s\n" "$UI_CYAN" "$UI_NC" "$*" >&2; }
 success() { printf "%b[SUCCESS]%b %s\n" "$UI_GREEN" "$UI_NC" "$*" >&2; }
 hint() { printf "%b[HINT]%b %s\n" "$UI_GRAY" "$UI_NC" "$*" >&2; }
 
-color_menu_option() { printf "%b%s%b\n" "$UI_BEIGE" "$*" "$UI_NC" >&2; }
+screen_text() { printf "%s\n" "$*" >&2; }
+screen_warn() { printf "%b%s%b\n" "$UI_YELLOW" "$*" "$UI_NC" >&2; }
+screen_success() { printf "%b%s%b\n" "$UI_GREEN" "$*" "$UI_NC" >&2; }
+screen_error() { printf "%b%s%b\n" "$UI_RED" "$*" "$UI_NC" >&2; }
+
+ui_log_append() {
+  ensure_log_dir "${BDTOOL_ROOT:-}"
+  printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$BDTOOL_UX_LOG"
+}
+
+ui_log_info() { ui_log_append "[INFO] $*"; }
+ui_log_warn() { ui_log_append "[WARN] $*"; }
+ui_log_error() { ui_log_append "[ERROR] $*"; }
+
+color_menu_option() {
+  printf "%b%s%b\n" "$MENU_OPT_COLOR" "$*" "$UI_NC" >&2
+}
 menu_option() { color_menu_option "$@"; }
 
 # Backward-compatible aliases.
@@ -85,7 +103,7 @@ confirm() {
     case "$ans" in
       [Yy]) return 0 ;;
       [Nn]) return 1 ;;
-      *) warn "无效输入，请输入 y 或 n。" ;;
+      *) screen_warn "无效输入，请输入 y 或 n。" ;;
     esac
   done
 }
@@ -327,7 +345,8 @@ prompt_secret_with_rules() {
       else
         value="PTBD$(date +%s%N | tail -c 14)"
       fi
-      info "无人值守模式：已自动填充 ${var_name}。"
+      screen_text "无人值守模式：已自动填充 ${var_name}。"
+      ui_log_info "Auto-filled ${var_name} in non-interactive mode."
     else
       printf "  > %s: " "$prompt" >&2
       read -r -s value < /dev/tty || true
@@ -341,8 +360,9 @@ prompt_secret_with_rules() {
     fi
 
     if [[ ${#value} -lt min_len ]]; then
-      error "安全性不足：密码长度必须 ≥ ${min_len} 位！"
-      hint "请重新输入，建议使用 16 位以上。"
+      screen_error "安全性不足：密码长度必须 ≥ ${min_len} 位！"
+      screen_warn "请重新输入，建议使用 16 位以上。"
+      ui_log_warn "Secret length check failed: min_len=${min_len}"
       retry=$((retry + 1))
       continue
     fi
@@ -391,8 +411,9 @@ prompt_with_default_and_validate() {
       return 0
     fi
 
-    error "输入校验失败：${prompt}"
-    hint "请按提示修正后重试。"
+    screen_error "输入校验失败：${prompt}"
+    screen_warn "请按提示修正后重试。"
+    ui_log_warn "Validation failed for ${var_name} with validator ${validator_fn}."
     retry=$((retry + 1))
   done
 

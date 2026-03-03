@@ -174,7 +174,8 @@ switch_language() {
 }
 
 has_scan_capability() {
-  [[ -x "$ROOT_DIR/bdtool.sh" ]]
+  [[ -x "$ROOT_DIR/bdtool.sh" ]] || return 1
+  grep -qE '^[[:space:]]*scan\)' "$ROOT_DIR/bdtool.sh" 2>/dev/null
 }
 
 menu_pause() {
@@ -221,7 +222,6 @@ run_action() {
     success "$(t ACTION_SUCCESS_PREFIX)${label}$(t ACTION_DONE_SUFFIX)"
   else
     error "$(t ACTION_FAIL_PREFIX)${label}$(t ACTION_FAIL_SUFFIX)${BDTOOL_UX_LOG}"
-    hint "$(t HINT_LOG): $BDTOOL_UX_LOG"
   fi
 
   menu_pause
@@ -247,13 +247,13 @@ menu_loop() {
   while true; do
     show_banner
     hr
-    menu_option "$(t MENU_1)"
-    menu_option "$(t MENU_2)"
-    menu_option "$(t MENU_3)"
-    menu_option "$(t MENU_4)"
-    menu_option "$(t MENU_5)"
-    menu_option "$(t MENU_6)"
-    menu_option "$(t MENU_7)"
+    color_menu_option "$(t MENU_1)"
+    color_menu_option "$(t MENU_2)"
+    color_menu_option "$(t MENU_3)"
+    color_menu_option "$(t MENU_4)"
+    color_menu_option "$(t MENU_5)"
+    color_menu_option "$(t MENU_6)"
+    color_menu_option "$(t MENU_7)"
     hr
 
     local choice
@@ -284,7 +284,6 @@ menu_loop() {
         if confirm "$(t CONFIRM_CLEAN_1)" "N" && confirm "$(t CONFIRM_CLEAN_2)" "N"; then
           run_action CLEAN_RUNNING "$ROOT_DIR/bdtool.sh" clean
         else
-          info "$(t MENU_BYE)"
           menu_pause
         fi
         ;;
