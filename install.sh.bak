@@ -1,39 +1,29 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Euo pipefail
 
 ORIG_ARGS=("$@")
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
-bootstrap_log() {
-  local root="${PTBD_BOOTSTRAP_LOG_ROOT:-$(pwd)}"
-  local log_dir="$root/bdtool-output/logs"
-  local log_file="$log_dir/run.log"
-  mkdir -p "$log_dir"
-  touch "$log_file"
-  printf '[%s] [bootstrap] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$log_file" >&2
+bootstrap_msg() {
+  printf "[%s] [bootstrap] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
-bootstrap_die() {
-  bootstrap_log "ERROR: $*"
-  bootstrap_log "详情日志：${PTBD_BOOTSTRAP_LOG_ROOT:-$(pwd)}/bdtool-output/logs/run.log"
-  exit 1
-}
-
-run_timed_bootstrap() {
+run_ext_boot() {
   local timeout_s="${1:-300}"
   shift
   if command -v timeout >/dev/null 2>&1; then
     timeout --preserve-status "${timeout_s}s" "$@"
     return $?
   fi
+
   "$@" &
   local pid=$!
-  local begin now
-  begin="$(date +%s)"
+  local start_ts now_ts
+  start_ts="$(date +%s)"
   while kill -0 "$pid" 2>/dev/null; do
-    now="$(date +%s)"
-    if (( now - begin >= timeout_s )); then
+    now_ts="$(date +%s)"
+    if (( now_ts - start_ts >= timeout_s )); then
       kill -TERM "$pid" 2>/dev/null || true
       sleep 1
       kill -KILL "$pid" 2>/dev/null || true
@@ -50,93 +40,194 @@ bootstrap_fetch_repo() {
   local repo_dir="$tmp_root/PT-BDtool"
 
   if command -v git >/dev/null 2>&1; then
-    bootstrap_log "尝试 git clone 仓库..."
-    if run_timed_bootstrap 300 git clone --depth 1 --branch main https://github.com/My15sir/PT-BDtool.git "$repo_dir" >/dev/null 2>&1; then
+    bootstrap_msg "尝试 git clone 仓库..."
+    if run_ext_boot 300 git clone --depth 1 --branch main https://github.com/My15sir/PT-BDtool.git "$repo_dir" >/dev/null 2>&1; then
       echo "$repo_dir"
       return 0
     fi
-    bootstrap_log "git clone 失败，回退到归档下载。"
+    bootstrap_msg "git clone 失败，回退归档下载。"
   fi
 
   local tarball="$tmp_root/repo.tar.gz"
   local tar_url="https://codeload.github.com/My15sir/PT-BDtool/tar.gz/refs/heads/main"
 
   if command -v curl >/dev/null 2>&1; then
-    bootstrap_log "尝试 curl 下载仓库归档..."
-    run_timed_bootstrap 300 curl -fL --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors -o "$tarball" "$tar_url" >/dev/null 2>&1 || true
+    run_ext_boot 300 curl -fL --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors -o "$tarball" "$tar_url" >/dev/null 2>&1 || true
   fi
-
   if [[ ! -s "$tarball" ]] && command -v wget >/dev/null 2>&1; then
-    bootstrap_log "尝试 wget 下载仓库归档..."
-    run_timed_bootstrap 300 wget -q -O "$tarball" "$tar_url" >/dev/null 2>&1 || true
+    run_ext_boot 300 wget -q -O "$tarball" "$tar_url" >/dev/null 2>&1 || true
   fi
 
   [[ -s "$tarball" ]] || return 1
-  command -v tar >/dev/null 2>&1 || bootstrap_die "缺少 tar，无法解压仓库归档"
+  command -v tar >/dev/null 2>&1 || return 1
+  run_ext_boot 300 tar -xzf "$tarball" -C "$tmp_root" >/dev/null 2>&1 || return 1
 
-  run_timed_bootstrap 300 tar -xzf "$tarball" -C "$tmp_root" >/dev/null 2>&1 || return 1
   local extracted
   extracted="$(find "$tmp_root" -maxdepth 1 -type d -name 'PT-BDtool-*' | head -n 1 || true)"
-  [[ -n "$extracted" && -d "$extracted" ]] || return 1
+  [[ -n "$extracted" ]] || return 1
   echo "$extracted"
 }
 
 if [[ "${PTBD_BOOTSTRAP_DONE:-0}" != "1" && ! -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
-  export PTBD_BOOTSTRAP_LOG_ROOT="${PTBD_BOOTSTRAP_LOG_ROOT:-$(pwd)}"
-  bootstrap_log "检测到缺少 lib/ui.sh，进入自举模式。"
-
+  bootstrap_msg "检测到缺少 lib/ui.sh，进入自举模式。"
   tmp_boot="$(mktemp -d -t ptbd-install-XXXXXX)"
   keep_tmp="${KEEP_TMP:-0}"
-  cleanup_bootstrap() {
+  cleanup_boot() {
     if [[ "$keep_tmp" == "1" ]]; then
-      bootstrap_log "KEEP_TMP=1，保留临时目录：$tmp_boot"
+      bootstrap_msg "KEEP_TMP=1，保留临时目录：$tmp_boot"
     else
       rm -rf "$tmp_boot" 2>/dev/null || true
     fi
   }
-  trap cleanup_bootstrap EXIT
+  trap cleanup_boot EXIT
 
-  repo_boot_dir="$(bootstrap_fetch_repo "$tmp_boot" || true)"
-  [[ -n "$repo_boot_dir" && -f "$repo_boot_dir/install.sh" && -f "$repo_boot_dir/lib/ui.sh" ]] || bootstrap_die "自举获取完整仓库失败（请检查网络或代理）"
+  repo_dir="$(bootstrap_fetch_repo "$tmp_boot" || true)"
+  if [[ -z "$repo_dir" || ! -f "$repo_dir/install.sh" ]]; then
+    echo "自举失败：无法获取完整仓库。"
+    exit 1
+  fi
 
-  bootstrap_log "自举完成，切换到仓库目录继续执行：$repo_boot_dir"
-  PTBD_BOOTSTRAP_DONE=1 PTBD_BOOTSTRAP_LOG_ROOT="$PTBD_BOOTSTRAP_LOG_ROOT" bash "$repo_boot_dir/install.sh" "${ORIG_ARGS[@]}"
+  bootstrap_msg "自举完成，切换到仓库目录继续执行：$repo_dir"
+  PTBD_BOOTSTRAP_DONE=1 bash "$repo_dir/install.sh" "${ORIG_ARGS[@]}"
   exit $?
 fi
 
 # shellcheck source=lib/ui.sh
 source "$SCRIPT_DIR/lib/ui.sh"
+# shellcheck source=lib/i18n.sh
+source "$SCRIPT_DIR/lib/i18n.sh"
 
-BDTOOL_ROOT="$SCRIPT_DIR"
-ensure_log_dir "$SCRIPT_DIR"
-setup_log_redirection "$SCRIPT_DIR"
+LANG_OVERRIDE=""
+NON_INTERACTIVE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lang)
+      [[ $# -ge 2 ]] || break
+      LANG_OVERRIDE="$2"
+      shift 2
+      ;;
+    --lang=*)
+      LANG_OVERRIDE="${1#*=}"
+      shift
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
-trap 'ui_log_error "install ERR cmd=${BASH_COMMAND:-unknown}"; screen_error "安装流程异常"; screen_error "详情见日志：$BDTOOL_RUN_LOG"; exit 1' ERR
-trap 'ui_log_error "install interrupted INT"; exit 130' INT
-trap 'ui_log_error "install interrupted TERM"; exit 143' TERM
+set_lang "$LANG_OVERRIDE"
 
-if [[ ! -x "$SCRIPT_DIR/bdtool" ]]; then
-  chmod +x "$SCRIPT_DIR/bdtool" 2>/dev/null || true
-fi
-
-if [[ $# -eq 0 ]]; then
-  if [[ -t 0 && -t 1 ]]; then
-    # 安装入口：第一步直接展示 1-7 菜单
-    exec "$SCRIPT_DIR/bdtool" --lang zh
+install_target_root() {
+  local target_root
+  if [[ -w "/opt" || ${EUID:-$(id -u)} -eq 0 ]]; then
+    target_root="/opt/PT-BDtool"
+  else
+    target_root="$HOME/.local/share/pt-bdtool/PT-BDtool-app"
   fi
-  exec "$SCRIPT_DIR/bdtool" install --non-interactive --lang zh
+
+  mkdir -p "$target_root/lib"
+  cp -f "$SCRIPT_DIR/bdtool" "$target_root/bdtool"
+  cp -f "$SCRIPT_DIR/install.sh" "$target_root/install.sh"
+  cp -f "$SCRIPT_DIR/README.md" "$target_root/README.md" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/lib/ui.sh" "$target_root/lib/ui.sh"
+  cp -f "$SCRIPT_DIR/lib/i18n.sh" "$target_root/lib/i18n.sh"
+  chmod +x "$target_root/bdtool" "$target_root/install.sh"
+
+  if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then
+    ln -sf "$target_root/bdtool" /usr/local/bin/bdtool
+  else
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$target_root/bdtool" "$HOME/.local/bin/bdtool"
+    screen "请确保 ~/.local/bin 在 PATH 中。"
+  fi
+
+  echo "$target_root"
+}
+
+pkg_manager_install() {
+  local pkg="$1"
+  local updated="${2:-0}"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    local sudo_cmd=()
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo_cmd=(sudo)
+      else
+        return 1
+      fi
+    fi
+
+    if [[ ${#sudo_cmd[@]} -gt 0 ]]; then
+      screen "正在使用 root 安装依赖..."
+    fi
+
+    if [[ "$updated" == "0" ]]; then
+      run_ext_boot 300 "${sudo_cmd[@]}" apt-get update >/dev/null 2>&1 || return 2
+    fi
+
+    run_ext_boot 300 "${sudo_cmd[@]}" apt-get install -y "$pkg" >/dev/null 2>&1 || return 3
+    return 0
+  fi
+
+  return 4
+}
+
+check_and_install_dep() {
+  local dep_cmd="$1"
+  local dep_pkg="$2"
+  local -n updated_ref=$3
+
+  if command -v "$dep_cmd" >/dev/null 2>&1; then
+    screen "$dep_cmd $(t DEPEND_OK)"
+    return 0
+  fi
+
+  screen "$dep_cmd $(t DEPEND_INSTALLING)"
+  if pkg_manager_install "$dep_pkg" "$updated_ref"; then
+    updated_ref=1
+    if command -v "$dep_cmd" >/dev/null 2>&1; then
+      screen "$dep_cmd $(t DEPEND_OK)"
+      return 0
+    fi
+  fi
+
+  screen_error "$dep_cmd $(t DEPEND_FAIL)"
+  return 1
+}
+
+section "PT-BDtool"
+updated_once=0
+failed_dep=0
+
+check_and_install_dep bash bash updated_once || failed_dep=1
+check_and_install_dep find findutils updated_once || failed_dep=1
+check_and_install_dep awk gawk updated_once || failed_dep=1
+check_and_install_dep sed sed updated_once || failed_dep=1
+check_and_install_dep sort coreutils updated_once || failed_dep=1
+check_and_install_dep timeout coreutils updated_once || failed_dep=1
+check_and_install_dep zip zip updated_once || failed_dep=1
+check_and_install_dep tar tar updated_once || failed_dep=1
+check_and_install_dep ffmpeg ffmpeg updated_once || true
+check_and_install_dep ffprobe ffmpeg updated_once || true
+check_and_install_dep mediainfo mediainfo updated_once || true
+
+if [[ "$failed_dep" -ne 0 ]]; then
+  ensure_output_root
+  write_error_file "依赖安装失败" "请检查网络或权限后重试。"
+  screen_error "$(t ERR_HINT_FILE)$ERROR_FILE"
 fi
 
-case "$1" in
-  --non-interactive)
-    shift
-    exec "$SCRIPT_DIR/bdtool" install --non-interactive --lang zh "$@"
-    ;;
-  install|doctor|scan|clean|logs|tasks|help|--help|-h)
-    exec "$SCRIPT_DIR/bdtool" "$@"
-    ;;
-  *)
-    # 兼容旧用法：未知参数默认走安装
-    exec "$SCRIPT_DIR/bdtool" install "$@"
-    ;;
-esac
+target_root="$(install_target_root)"
+screen "安装目录：$target_root"
+
+if [[ "$NON_INTERACTIVE" -eq 1 || ! -t 0 ]]; then
+  exec "$target_root/bdtool" --non-interactive --lang "$LANG_CODE"
+fi
+
+exec "$target_root/bdtool" --lang "$LANG_CODE"
