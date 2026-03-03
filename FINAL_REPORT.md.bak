@@ -2,109 +2,98 @@
 
 ## 问题原因
 
-用户报错：
+现象：安装与参数校验阶段缺少统一错误态体验，输入校验失败时提示不统一，且无人值守场景容易出现流程中断风险。
 
-```text
-[ERROR] missing lib/ui.sh
-```
-
-根因：`install.sh` 在脚本开头直接 `source "$SCRIPT_DIR/lib/ui.sh"`。当用 `bash <(curl -fsSL .../install.sh)` 执行时，`SCRIPT_DIR` 指向临时 FD 路径，不是仓库目录，导致 `lib/ui.sh` 不存在，脚本立即退出。
+目标对齐：参考 `Auto-Seedbox-PT/auto_seedbox_pt.sh` 的交互风格，统一实现 `[ERROR]/[WARN]/[INFO]/[HINT]` 分级输出、可恢复错误重试、不可恢复错误统一退出并指向日志。
 
 ## 修复方案
 
-对 `install.sh` 增加“自举阶段”并保持无人值守：
+1. 重构 `lib/ui.sh` 为统一 UI 层。
+2. 增加错误态组件与提示组件：`error/warn/info/success/hint/error_box`。
+3. 增加可重试输入函数：
+   - `prompt_secret_with_rules(var_name, prompt, min_len, max_retry, allow_empty)`
+   - `prompt_with_default_and_validate(var_name, prompt, default, validator_fn, max_retry)`
+4. 保持兼容：保留 `log_info/log_warn/log_err/log_success` 别名，旧调用不失效。
+5. 统一日志：`setup_log_redirection` + `run_cmd_logged` + `execute_with_spinner`，所有 stdout/stderr 追加到 `./bdtool-output/logs/run.log`。
+6. 不可恢复错误统一 `die`：打印错误并提示日志路径。
+7. `install.sh` 接入：
+   - 新增 `ERR trap` 未捕捉异常提示。
+   - 新增密码输入校验流程，支持无人值守默认值与参数覆盖。
+   - 新增 `DEMO=1` 演示模式：自动模拟一次短密码失败后重试成功。
 
-1. 在 `source lib/ui.sh` 之前做检测：若缺失 `lib/ui.sh`，进入自举模式。
-2. 自举流程：
-   - `mktemp -d` 建临时目录。
-   - 优先 `git clone --depth 1 --branch main` 拉取完整仓库。
-   - clone 失败则回退为 `codeload` tarball 下载 + `tar -xzf` 解压。
-   - 获取完整仓库后，以 `PTBD_BOOTSTRAP_DONE=1` 重新执行仓库内 `install.sh`。
-3. 清理策略：默认清理临时目录；`KEEP_TMP=1` 可保留排障。
-4. 无人值守：不做交互输入，默认值可由环境变量覆盖。
-5. 超时与日志：
-   - 自举命令统一 300s 超时。
-   - 自举日志也写入 `./bdtool-output/logs/run.log`。
-6. 保持原安装行为：仓库内运行时仍沿用原安装逻辑（依赖安装、下载 bdtool、可选 BDInfo 安装）。
+## 错误态覆盖点
 
-## 改动文件清单
+- 密码长度不足（可恢复/可重试）：
+  - 错误文案：`[ERROR] 安全性不足：密码长度必须 ≥ 12 位！`
+  - 修复提示：`[HINT] 请重新输入，建议使用 16 位以上。`
+  - 自动重试：最多 `max_retry` 次。
+- 参数直传密码不合法（不可恢复）：
+  - `--password short` 直接报错并 `die` 退出。
+  - 明确提示日志路径：`./bdtool-output/logs/run.log`。
+- 未捕捉异常（不可恢复）：
+  - `trap ERR` 统一输出错误与日志路径（可控 tail 日志）。
 
+## 可重试输入函数说明
+
+### prompt_secret_with_rules
+
+- 隐藏输入（TTY 下 `read -s`）。
+- 支持无人值守：`BDTOOL_NO_PROMPT=1` 自动选择默认值或环境变量。
+- 支持重试队列（用于 DEMO 自动化）：`PROMPT_INPUTS_<VAR>`。
+- 长度不足时输出 `ERROR + HINT` 并重试。
+- 超过重试上限执行 `die("多次输入失败，已退出。")`。
+
+### prompt_with_default_and_validate
+
+- 支持默认值。
+- 支持验证函数注入（返回 0 为通过）。
+- 校验失败输出 `ERROR + HINT` 并重试。
+- 超过重试上限统一 `die`。
+
+## 改动/新增文件清单
+
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh`
 - `/media/15sir/DataHub/Github/PT-BDtool/install.sh`
-- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
 - `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md`
 
-## git 状态记录
-
-修改前已记录工作区状态；当前状态：
-
-```text
- M install.sh
- M install.sh.bak
-```
+备份文件：
+- `/media/15sir/DataHub/Github/PT-BDtool/lib/ui.sh.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/install.sh.bak`
+- `/media/15sir/DataHub/Github/PT-BDtool/FINAL_REPORT.md.bak`
 
 ## 复跑测试结果
 
-日志文件：`/media/15sir/DataHub/Github/PT-BDtool/bdtool-output/logs/auto-fix-install.log`
+测试日志：
+- 运行日志：`/media/15sir/DataHub/Github/PT-BDtool/bdtool-output/logs/run.log`
+- 演示日志：`/media/15sir/DataHub/Github/PT-BDtool/bdtool-output/logs/ui-error-demo.log`
 
-### 测试1（仓库内）
+| 用例 | 命令 | 结果 |
+|---|---|---|
+| RETEST1 | `timeout 300 bash install.sh --dry-run` | PASS (RC=0) |
+| RETEST2 | `timeout 300 DEMO=1 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run` | PASS (RC=0) |
+| RETEST3 | `timeout 300 BDTOOL_NO_PROMPT=1 bash install.sh --dry-run --password short` | PASS（按预期失败，RC=1，输出 ERROR+HINT+日志路径） |
 
-命令：
-
-```bash
-cd /media/15sir/DataHub/Github/PT-BDtool && bash install.sh
-```
-
-结果：`rc=0`（成功）
-
-关键日志片段：
+关键演示片段（来自 `ui-error-demo.log`）：
 
 ```text
-===== 2026-03-03 16:26:02 test1 start: bash install.sh =====
-[INFO] Install started
-[INFO] 下载 bdtool...
-[SUCCESS] BDInfo is available
-[INFO] Install completed
-===== 2026-03-03 16:26:02 test1 end rc=0 =====
-```
-
-### 测试2（模拟 curl|bash）
-
-说明：本地改动未发布到 GitHub remote，真实 `curl -fsSL https://raw.githubusercontent...` 拉到的是远端旧版本，无法直接验证本地修复。因此按要求使用“非仓库目录本地模拟 raw 执行”。
-
-命令（模拟）：
-
-```bash
-tmpd=$(mktemp -d)
-cp /media/15sir/DataHub/Github/PT-BDtool/install.sh "$tmpd/install.sh"
-bash "$tmpd/install.sh"
-```
-
-结果：`rc=0`（成功）
-
-关键日志片段：
-
-```text
-===== 2026-03-03 16:27:19 test2 start: simulated raw install.sh ... =====
-[bootstrap] 检测到缺少 lib/ui.sh，进入自举模式。
-[bootstrap] 尝试 git clone 仓库...
-[bootstrap] 自举完成，切换到仓库目录继续安装：/tmp/ptbd-install-.../PT-BDtool
-[INFO] Install started
-[INFO] 下载 bdtool...
-[INFO] Install completed
-===== 2026-03-03 16:27:21 test2 end rc=0 =====
+[INFO] DEMO=1：将自动演示一次短密码失败并重试成功。
+[ERROR] 安全性不足：密码长度必须 ≥ 12 位！
+[HINT] 请重新输入，建议使用 16 位以上。
+[SUCCESS] DEMO：密码重试流程验证通过。
 ```
 
 ## 回滚命令
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
+cp -f lib/ui.sh.bak lib/ui.sh
 cp -f install.sh.bak install.sh
-cp -f FINAL_REPORT.md.bak FINAL_REPORT.md 2>/dev/null || true
+cp -f FINAL_REPORT.md.bak FINAL_REPORT.md
 ```
 
-可选 git 回滚方案：
+可选 git 回滚：
 
 ```bash
 cd /media/15sir/DataHub/Github/PT-BDtool
-git checkout -- install.sh install.sh.bak FINAL_REPORT.md
+git checkout -- lib/ui.sh install.sh FINAL_REPORT.md
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 ORIG_ARGS=("$@")
 SCRIPT_PATH="${BASH_SOURCE[0]}"
@@ -114,15 +114,19 @@ LOG_ROOT="${PTBD_BOOTSTRAP_LOG_ROOT:-$SCRIPT_DIR}"
 ensure_log_dir "$LOG_ROOT"
 setup_log_redirection "$LOG_ROOT"
 
+trap 'error "发生未捕捉错误，详情见日志"; error "详情日志：$BDTOOL_RUN_LOG"; if [[ "${SHOW_ERR_TAIL:-1}" == "1" ]]; then echo; tail -n 50 "$BDTOOL_RUN_LOG" 2>/dev/null || true; fi' ERR
+
 : "${BDTOOL_NO_PROMPT:=1}"
 : "${BDTOOL_CMD_TIMEOUT:=300}"
 : "${BDTOOL_FETCH_TIMEOUT:=45}"
 : "${BDTOOL_FETCH_RETRIES:=3}"
 : "${BDTOOL_HTTP_PROXY:=}"
+: "${DEMO:=0}"
 
 DO_K="0"
 ARG_LANG=""
 DRY_RUN="0"
+INSTALL_PASSWORD="${BDTOOL_INSTALL_PASSWORD:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -138,6 +142,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       DRY_RUN="1"
+      shift
+      ;;
+    --password)
+      [[ $# -ge 2 ]] || die "--password requires a value"
+      INSTALL_PASSWORD="$2"
+      shift 2
+      ;;
+    --password=*)
+      INSTALL_PASSWORD="${1#*=}"
       shift
       ;;
     *)
@@ -191,9 +204,9 @@ msg() {
   local zh="$1"
   local en="$2"
   if [[ "$BD_LANG" == "zh" ]]; then
-    log_info "$zh"
+    info "$zh"
   else
-    log_info "$en"
+    info "$en"
   fi
 }
 
@@ -392,7 +405,7 @@ install_bdinfo_cli() {
     "https://ghproxy.com/https://github.com/tetrahydroc/BDInfoCLI/releases/latest/download/BDInfo-linux-x64.tar.gz"
   )
 
-  log_info "下载 BDInfoCLI-ng..."
+  info "下载 BDInfoCLI-ng..."
   fetch_with_fallbacks "$tarball" "${urls[@]}" || { rm -rf "$tmpd"; return 1; }
   execute_with_spinner "解压 BDInfoCLI-ng" tar -xzf "$tarball" -C "$tmpd" || { rm -rf "$tmpd"; return 1; }
   bdinfo_bin="$(find "$tmpd" -type f -name BDInfo | head -n 1 || true)"
@@ -408,16 +421,49 @@ install_bdinfo_cli() {
   return 0
 }
 
+validate_password_len_12() {
+  [[ ${#1} -ge 12 ]]
+}
+
+collect_install_password() {
+  if [[ -n "$INSTALL_PASSWORD" ]]; then
+    if validate_password_len_12 "$INSTALL_PASSWORD"; then
+      success "密码校验通过。"
+      return 0
+    fi
+    error "安全性不足：密码长度必须 ≥ 12 位！"
+    hint "请通过 --password 或 BDTOOL_INSTALL_PASSWORD 传入 12 位以上密码。"
+    die "安装参数校验失败。"
+  fi
+
+  if [[ "$DEMO" == "1" ]]; then
+    info "DEMO=1：将自动演示一次短密码失败并重试成功。"
+    export PROMPT_INPUTS_INSTALL_PASSWORD="${PROMPT_INPUTS_INSTALL_PASSWORD:-short123,VeryStrongPassword123!}"
+    prompt_secret_with_rules INSTALL_PASSWORD "请输入管理密码（必须 >= 12 位）" 12 3 0
+    success "DEMO：密码重试流程验证通过。"
+    return 0
+  fi
+
+  prompt_secret_with_rules INSTALL_PASSWORD "请输入管理密码（可留空跳过）" 12 3 1
+  if [[ -n "$INSTALL_PASSWORD" ]]; then
+    success "密码校验通过。"
+  else
+    info "未设置管理密码，继续执行安装。"
+  fi
+}
+
 section "PT-BDtool install"
 msg "安装开始" "Install started"
+
+collect_install_password
 
 if [[ "$DRY_RUN" == "1" ]]; then
   msg "当前为 dry-run，仅做环境检测，不执行下载/安装。" "Dry-run mode, only checks environment without downloading/installing."
   for c in bash ffmpeg ffprobe mediainfo BDInfo curl wget git tar unzip; do
     if need_cmd "$c"; then
-      log_success "found: $c"
+      success "found: $c"
     else
-      log_warn "missing: $c"
+      warn "missing: $c"
     fi
   done
   exit 0
@@ -430,19 +476,19 @@ fi
 INSTALL_DIR="$(choose_install_dir)"
 mkdir -p "$INSTALL_DIR"
 
-log_info "下载 bdtool..."
+info "下载 bdtool..."
 download_bdtool_binary "$INSTALL_DIR/bdtool" || die "failed to download bdtool (check network/proxy and $BDTOOL_RUN_LOG)"
 chmod +x "$INSTALL_DIR/bdtool"
 
 ensure_path_for_user_dir "$INSTALL_DIR"
 if ! need_cmd BDInfo; then
-  install_bdinfo_cli "$INSTALL_DIR" || log_warn "BDInfo install failed, continue"
+  install_bdinfo_cli "$INSTALL_DIR" || warn "BDInfo install failed, continue"
 fi
 
 if need_cmd BDInfo; then
-  log_success "BDInfo is available"
+  success "BDInfo is available"
 else
-  log_warn "BDInfo is missing, please configure PATH or install manually"
+  warn "BDInfo is missing, please configure PATH or install manually"
 fi
 
 msg "安装完成" "Install completed"
