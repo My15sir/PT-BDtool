@@ -27,6 +27,22 @@ screen() {
   printf "%s\n" "$*"
 }
 
+log_info() {
+  printf "[INFO] %s\n" "$*" >&2
+}
+
+log_warn() {
+  printf "[WARN] %s\n" "$*" >&2
+}
+
+log_err() {
+  printf "[ERROR] %s\n" "$*" >&2
+}
+
+log_success() {
+  printf "[SUCCESS] %s\n" "$*" >&2
+}
+
 screen_error() {
   printf "%b%s%b\n" "$C_RED" "$*" "$C_RESET"
 }
@@ -74,6 +90,47 @@ write_error_file() {
     printf "reason: %s\n" "$reason"
     printf "suggestion: %s\n" "$suggestion"
   } > "$ERROR_FILE"
+}
+
+ensure_log_dir() {
+  local root="${1:-$(pwd)}"
+  BDTOOL_ROOT="$root"
+  BDTOOL_LOG_DIR="$root/bdtool-output/logs"
+  BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"
+  mkdir -p "$BDTOOL_LOG_DIR"
+  touch "$BDTOOL_RUN_LOG"
+}
+
+setup_log_redirection() {
+  ensure_log_dir "${1:-$(pwd)}"
+  if [[ "${BDTOOL_LOG_REDIRECTED:-0}" == "1" ]]; then
+    return 0
+  fi
+  BDTOOL_LOG_REDIRECTED=1
+  exec > >(tee -a "$BDTOOL_RUN_LOG") 2> >(tee -a "$BDTOOL_RUN_LOG" >&2)
+}
+
+execute_with_spinner() {
+  local message="$1"
+  shift
+  ensure_log_dir "${BDTOOL_ROOT:-$(pwd)}"
+  "$@" >> "$BDTOOL_RUN_LOG" 2>&1
+  local rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    log_success "$message 完成"
+  else
+    log_err "$message 失败 (请查看 $BDTOOL_RUN_LOG)"
+  fi
+  return "$rc"
+}
+
+die() {
+  local message="${1:-执行失败}"
+  local code="${2:-1}"
+  ensure_log_dir "${BDTOOL_ROOT:-$(pwd)}"
+  log_err "$message"
+  log_err "详情日志：$BDTOOL_RUN_LOG"
+  exit "$code"
 }
 
 run_ext() {

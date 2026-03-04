@@ -7,11 +7,17 @@ A Bash tool for generating PT upload materials automatically.
 ### Quick Start
 
 ```bash
-./bdtool.sh install
-./bdtool.sh doctor
-./bdtool.sh /path/to/video_or_BDMV_or_iso
-./bdtool.sh clean
+bash install.sh
+bdtool --help
+bdtool doctor
+bdtool /path/to/video_or_BDMV_or_iso
+bdtool clean
 ```
+
+### Entrypoints
+
+- `bdtool`: main installed command (interactive menu style)
+- `./bdtool.sh`: script-style compatibility entry used in CI and automation
 
 ### Output Structure Rules
 
@@ -48,7 +54,7 @@ bash install.sh
 Preferred entry:
 
 ```bash
-./bdtool.sh /path/to/videos
+bdtool /path/to/videos
 ```
 
 Compatibility entry:
@@ -61,6 +67,12 @@ Dry mode:
 
 ```bash
 ./bdtool.sh /path/to/videos --mode dry
+```
+
+Version:
+
+```bash
+./bdtool.sh --version
 ```
 
 ### Output Example
@@ -96,6 +108,17 @@ bdtool-output/
 
 - This is an AI-generated project.
 - Issues / feature requests / pull requests are currently not accepted.
+
+### Test
+
+```bash
+./full-test.sh
+./codex-run.sh
+```
+
+Notes:
+- `codex-run.sh` runs tests only by default.
+- To enable auto commit/push in that workflow, use `CODEX_RUN_GIT=1 ./codex-run.sh`.
 
 ### License
 

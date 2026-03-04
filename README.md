@@ -123,9 +123,28 @@ apt 稳定性策略：
 ```bash
 bdtool
 bdtool --lang en
-bdtool scan
 bdtool --help
+bdtool doctor
+bdtool clean
+./bdtool.sh --version
+bdtool scan
 ```
+
+## 入口说明
+
+- `bdtool`：安装后的主入口（交互菜单）
+- `./bdtool.sh`：兼容脚本入口（CI/自动化更常用）
+
+## 测试与工作流
+
+```bash
+./full-test.sh
+./codex-run.sh
+```
+
+说明：
+- `codex-run.sh` 默认仅执行测试，不自动提交/推送。
+- 如需自动提交与推送：`CODEX_RUN_GIT=1 ./codex-run.sh`
 
 ## 仓库清理与目录规范
 

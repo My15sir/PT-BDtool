@@ -26,6 +26,7 @@ else
 fi
 
 APP_NAME="bdtool"
+BT_VERSION="${BT_VERSION:-0.1.0}"
 
 bt_die() { die "$*"; }
 bt_log() {
@@ -363,6 +364,7 @@ bdtool <path> [options]
 bdtool scan <path> --out <dir> [options]  # 兼容入口
 bdtool doctor
 bdtool status  Check installation status
+bdtool version
 bdtool install
 bdtool clean
 
@@ -383,9 +385,14 @@ examples:
   ./bdtool.sh /data/videos -s 6 -j 2
   ./bdtool.sh movie.mkv --log-level debug
   ./bdtool.sh scan /data/videos --out output
+  ./bdtool.sh --version
   ./bdtool.sh install
   ./bdtool.sh clean
 USAGE
+}
+
+bt_cmd_version() {
+  echo "$APP_NAME $BT_VERSION"
 }
 
 bt_cmd_doctor() {
@@ -621,8 +628,11 @@ bt_main() {
       shift
       bt_cmd_clean
       ;;
-    -h|--help)
+    -h|--help|help)
       bt_usage
+      ;;
+    -v|--version|version)
+      bt_cmd_version
       ;;
     *)
       if [[ -e "$1" ]]; then
