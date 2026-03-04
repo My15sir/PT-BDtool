@@ -3,11 +3,11 @@ set -euo pipefail
 
 on_err() {
   local rc="$?"
-  local line="${1:-unknown}"
+  local line="${BASH_LINENO[0]:-unknown}"
   echo "[ERROR] Start workflow failed at line ${line} (rc=${rc})" >&2
   exit "$rc"
 }
-trap 'on_err $LINENO' ERR
+trap on_err ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
