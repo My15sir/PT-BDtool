@@ -3,6 +3,14 @@ set -Euo pipefail
 
 resolve_script_path() {
   local src="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(readlink -f "$src" 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
   local dir=""
   while [[ -L "$src" ]]; do
     dir="$(cd -P "$(dirname "$src")" && pwd)"
@@ -14,6 +22,11 @@ resolve_script_path() {
 
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+if [[ ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
+  echo "[ERROR] Missing runtime file: $ROOT_DIR/lib/ui.sh" >&2
+  echo "[HINT] Reinstall with: bash install.sh --offline" >&2
+  exit 1
+fi
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
 setup_bundle_runtime "$ROOT_DIR"
@@ -30,8 +43,12 @@ BDTOOL_EXIT_REQUESTED=0
 
 on_err() {
   local rc=$?
-  write_error_file "执行失败 rc=$rc" "请检查输入目录或依赖后重试。"
-  screen_error "错误详情：$ERROR_FILE"
+  if declare -F write_error_file >/dev/null 2>&1; then
+    write_error_file "执行失败 rc=$rc" "请检查输入目录或依赖后重试。"
+    screen_error "错误详情：${ERROR_FILE:-unknown}"
+  else
+    screen_error "执行失败 rc=$rc"
+  fi
   exit "$rc"
 }
 trap on_err ERR

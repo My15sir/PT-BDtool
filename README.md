@@ -1,37 +1,16 @@
 # PT-BDtool
 
-PT 上传素材生成工具（Bash）。  
-PT upload material generator (Bash).
+<p><strong>Language / 语言:</strong> <a href="#-中文">中文</a> | <a href="#-english">English</a></p>
 
-## Quick Start（快速开始）
+---
 
-### CN
-- 本项目现在是**纯离线安装流程**：先在本地仓库准备依赖，再执行安装。
-- 不再支持在线一键安装（`bash <(curl ... install.sh)`）。
+## 🇨🇳 中文
 
-### EN
-- This project now uses an **offline-only install flow**: prepare dependencies in a local repo, then install.
-- Online one-liner install (`bash <(curl ... install.sh)`) is no longer supported.
+### 说明
+- 不支持 `bash <(curl ... install.sh)` 在线管道安装。
+- 必须在本地仓库目录（或离线包解压目录）执行 `install.sh --offline`。
 
-## Offline Install Only（仅支持离线安装）
-
-### CN
-旧方式已废弃（不要再用）：
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
-```
-上面命令会在 `/dev/fd` 场景失败，这是预期保护行为。
-
-### EN
-Deprecated method (do not use):
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
-```
-This fails by design in `/dev/fd` mode to prevent broken offline installs.
-
-## Copy-Paste Commands（可直接复制执行）
-
-### A) 普通用户 / Normal user
+### 首次安装（在线，从零开始，可复制执行）
 ```bash
 cd ~
 git clone https://github.com/My15sir/PT-BDtool.git
@@ -39,155 +18,174 @@ cd PT-BDtool
 bash scripts/fetch-deps.sh
 bash scripts/build-bundle.sh
 bash install.sh --offline
-export PATH="$HOME/.local/bin:$PATH"
-bdtool
 ```
 
-### B) VPS/root（有 sudo）/ VPS or root (with sudo)
+### 首次安装（离线，已具备离线包，可复制执行）
 ```bash
-cd /opt
-sudo git clone https://github.com/My15sir/PT-BDtool.git
+cd ~
+tar -xzf PT-BDtool-linux-amd64.tar.gz
+cd PT-BDtool-linux-amd64
+bash install.sh --offline
+```
+
+### 目录已存在时（更新方式，可复制执行）
+```bash
+cd ~/PT-BDtool
+git pull --ff-only
+bash scripts/fetch-deps.sh
+bash scripts/build-bundle.sh
+bash install.sh --offline
+```
+
+### 启动命令（安装后，可复制执行）
+```bash
+bdtool
+ptbd-start
+bdtool --help
+bdtool doctor
+```
+
+### 最小验证流程（可复制执行）
+```bash
+bdtool --help
+bdtool doctor
+ptbd-start --help
+```
+
+### FAQ（常见问题）
+
+#### 1) `/dev/fd/... offline dependency missing`
+你使用了 `bash <(curl ...install.sh)` 或 stdin/fd 方式。  
+请改用“先 clone，再本地执行”：
+```bash
+cd ~/PT-BDtool
+bash install.sh --offline
+```
+
+#### 2) `scripts/*.sh: No such file or directory`
+当前目录不在项目根目录。执行：
+```bash
+cd ~/PT-BDtool
+ls scripts
+```
+
+#### 3) `bdtool: command not found`
+普通用户安装后请确保 `~/.local/bin` 在 PATH：
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+bdtool --help
+```
+
+#### 4) 启动时报 `/usr/local/bin/lib/ui.sh` 或函数未定义
+这通常是旧软链/旧安装残留。先查看当前入口：
+```bash
+command -v bdtool
+ls -l "$(command -v bdtool)"
+```
+然后重新安装：
+```bash
+cd ~/PT-BDtool
+bash install.sh --offline
+```
+
+#### 5) 扫描无结果
+支持类型：
+- 视频：`*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
+- 蓝光目录：`BDMV`
+- 镜像：`*.iso`
+
+不要输入程序文件路径（例如 `/opt/PT-BDtool/bdtool`），请输入媒体目录。
+
+---
+
+## 🇺🇸 English
+
+### Notes
+- `bash <(curl ... install.sh)` is not supported.
+- Run `install.sh --offline` from a local repo directory (or extracted offline bundle).
+
+### First-time install (online from scratch, copy-paste)
+```bash
+cd ~
+git clone https://github.com/My15sir/PT-BDtool.git
 cd PT-BDtool
-sudo bash scripts/fetch-deps.sh
-sudo bash scripts/build-bundle.sh
-sudo bash install.sh --offline
+bash scripts/fetch-deps.sh
+bash scripts/build-bundle.sh
+bash install.sh --offline
+```
+
+### First-time install (offline bundle already available, copy-paste)
+```bash
+cd ~
+tar -xzf PT-BDtool-linux-amd64.tar.gz
+cd PT-BDtool-linux-amd64
+bash install.sh --offline
+```
+
+### Existing directory update flow (copy-paste)
+```bash
+cd ~/PT-BDtool
+git pull --ff-only
+bash scripts/fetch-deps.sh
+bash scripts/build-bundle.sh
+bash install.sh --offline
+```
+
+### Startup commands (after install, copy-paste)
+```bash
 bdtool
-```
-
-说明 / Notes:
-- CN：普通用户默认安装到 `~/.local/share/pt-bdtool/PT-BDtool-app`，命令软链到 `~/.local/bin`。
-- EN: Non-root install target is `~/.local/share/pt-bdtool/PT-BDtool-app`, with symlink in `~/.local/bin`.
-- CN：root/sudo 安装默认落到 `/opt/PT-BDtool`，命令软链到 `/usr/local/bin`。
-- EN: root/sudo install target is `/opt/PT-BDtool`, with symlink in `/usr/local/bin`.
-
-## Minimal Newbie Path（新手最小路径）
-
-### CN
-1. 打开终端，先执行 `cd ~`。  
-2. 克隆仓库：`git clone ...`。  
-3. 进入目录：`cd PT-BDtool`。  
-4. 依次执行：`fetch-deps -> build-bundle -> install --offline`。  
-5. 执行 `bdtool` 启动。  
-
-### EN
-1. Open terminal and run `cd ~` first.  
-2. Clone the repo: `git clone ...`.  
-3. Enter project folder: `cd PT-BDtool`.  
-4. Run in order: `fetch-deps -> build-bundle -> install --offline`.  
-5. Start with `bdtool`.  
-
-## Troubleshooting（常见报错排查）
-
-### 1) `/dev/fd/... offline dependency missing`
-CN：你使用了 `bash <(curl ...)` 或 stdin/fd 方式运行安装脚本。请改为“先克隆仓库，再在本地目录执行 `bash install.sh --offline`”。  
-EN: You ran installer via `bash <(curl ...)` or fd/stdin mode. Use local repo install: clone first, then run `bash install.sh --offline`.
-
-### 2) `scripts/*.sh: No such file or directory`
-CN：当前目录不在仓库根目录。先执行：
-```bash
-cd ~/PT-BDtool
-ls scripts
-```
-确认存在 `fetch-deps.sh`、`build-bundle.sh` 后再执行。  
-EN: You are not in project root. Run:
-```bash
-cd ~/PT-BDtool
-ls scripts
-```
-Make sure `fetch-deps.sh` and `build-bundle.sh` exist, then rerun.
-
-### 3) `bdtool: command not found`
-CN：安装后 PATH 里没有 `~/.local/bin`（普通用户场景）。执行：
-```bash
-export PATH="$HOME/.local/bin:$PATH"
+ptbd-start
 bdtool --help
+bdtool doctor
 ```
-EN: `~/.local/bin` is not in PATH (non-root install). Run:
+
+### Minimal verification (copy-paste)
+```bash
+bdtool --help
+bdtool doctor
+ptbd-start --help
+```
+
+### FAQ
+
+#### 1) `/dev/fd/... offline dependency missing`
+You are running installer through fd/stdin (`bash <(curl ...)`).  
+Use local repo install:
+```bash
+cd ~/PT-BDtool
+bash install.sh --offline
+```
+
+#### 2) `scripts/*.sh: No such file or directory`
+You are not in project root:
+```bash
+cd ~/PT-BDtool
+ls scripts
+```
+
+#### 3) `bdtool: command not found`
+For non-root install, add local bin to PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
 ```
 
-### 4) 启动异常或扫描无结果 / startup works but scan returns nothing
-CN：
-- 若 `bdtool` 启动异常，可先用 `ptbd-start` 兜底：
+#### 4) Startup shows `/usr/local/bin/lib/ui.sh` or undefined functions
+Usually an old symlink/old install issue. Check current entry:
 ```bash
-ptbd-start
+command -v bdtool
+ls -l "$(command -v bdtool)"
 ```
-- 若提示“未发现可处理条目”，请确认扫描目录中包含以下类型：
-  - 视频：`*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
-  - 蓝光：`BDMV` 目录
-  - 镜像：`*.iso`
-- 如果你输入了 `/opt/PT-BDtool/bdtool` 这类程序文件路径，请改为媒体目录，例如：
+Then reinstall:
 ```bash
-/home/<user>/Downloads
-```
-EN:
-- If `bdtool` startup is abnormal, try fallback:
-```bash
-ptbd-start
-```
-- If you get "No items found", ensure the target directory contains:
-  - Videos: `*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
-  - Blu-ray: `BDMV` folder
-  - Images: `*.iso`
-- If you entered a program path such as `/opt/PT-BDtool/bdtool`, use a media directory instead, for example:
-```bash
-/home/<user>/Downloads
+cd ~/PT-BDtool
+bash install.sh --offline
 ```
 
-## Verify Installation（安装验证）
+#### 5) Scan finds no results
+Supported scan types:
+- videos: `*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
+- Blu-ray directory: `BDMV`
+- image: `*.iso`
 
-### CN
-```bash
-bdtool --help
-bdtool doctor
-```
-期望看到帮助信息与依赖检查结果。
-
-### EN
-```bash
-bdtool --help
-bdtool doctor
-```
-Expected: help output and dependency check result.
-
-## Install Precheck / Skip Behavior（安装预检查与跳过策略）
-
-### CN
-- 预检查会输出 `dependency present` / `dependency missing`。
-- 未变化文件会输出 `skip (unchanged)`。
-- 依赖包命中缓存会输出 `skip (bundle cached)`。
-- 缺失依赖时会明确提示执行：
-  `bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
-
-### EN
-- Precheck prints `dependency present` / `dependency missing`.
-- Unchanged files print `skip (unchanged)`.
-- Cached dependency bundle prints `skip (bundle cached)`.
-- If dependencies are missing, installer prints:
-  `bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
-
-## Entrypoints（入口）
-
-### CN
-- `bdtool`：安装后的主入口。
-- `./bdtool.sh`：兼容脚本入口（CI/自动化常用）。
-
-### EN
-- `bdtool`: main command after install.
-- `./bdtool.sh`: compatibility entry for CI/automation.
-
-## Dependency Maintenance（依赖维护）
-
-### CN
-```bash
-bash scripts/update-deps.sh
-bash scripts/update-deps.sh --apply
-```
-
-### EN
-```bash
-bash scripts/update-deps.sh
-bash scripts/update-deps.sh --apply
-```
+Do not enter executable path (for example `/opt/PT-BDtool/bdtool`); enter a media directory.

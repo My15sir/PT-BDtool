@@ -4,7 +4,27 @@ set -euo pipefail
 # =====================
 # Bootstrap
 # =====================
-BT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bt_resolve_script_path() {
+  local src="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(readlink -f "$src" 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
+  local dir=""
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  echo "$src"
+}
+
+BT_SCRIPT_PATH="$(bt_resolve_script_path "${BASH_SOURCE[0]}")"
+BT_SCRIPT_DIR="$(cd -P "$(dirname "$BT_SCRIPT_PATH")" && pwd)"
 BDTOOL_ROOT="$BT_SCRIPT_DIR"
 if [[ -f "$BT_SCRIPT_DIR/lib/ui.sh" ]]; then
   # shellcheck source=lib/ui.sh

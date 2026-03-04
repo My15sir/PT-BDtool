@@ -13,6 +13,14 @@ trap 'on_err "${LINENO}" "$?"' ERR
 
 resolve_script_path() {
   local src="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(readlink -f "$src" 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
   local dir=""
   while [[ -L "$src" ]]; do
     dir="$(cd -P "$(dirname "$src")" && pwd)"
@@ -34,16 +42,16 @@ echo "================================"
 echo "Starting PT-BDtool workflow..."
 echo "================================"
 
-if command -v bdtool >/dev/null 2>&1; then
-  exec bdtool "$@"
-fi
-
 if [[ -x "$SCRIPT_DIR/bdtool" ]]; then
   exec "$SCRIPT_DIR/bdtool" "$@"
 fi
 
 if [[ -x "$SCRIPT_DIR/bdtool.sh" ]]; then
   exec "$SCRIPT_DIR/bdtool.sh" "$@"
+fi
+
+if command -v bdtool >/dev/null 2>&1; then
+  exec bdtool "$@"
 fi
 
 echo "[ERROR] Cannot find bdtool entrypoint." >&2
