@@ -76,6 +76,51 @@ resolve_data_dir() {
   printf "%s" "$HOME/.local/share/pt-bdtool/bdtool-output"
 }
 
+resolve_effective_home() {
+  local user_home="${HOME:-}"
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    local sudo_home=""
+    if command -v getent >/dev/null 2>&1; then
+      sudo_home="$(getent passwd "$SUDO_USER" | awk -F: '{print $6}' | head -n1)"
+    fi
+    [[ -z "$sudo_home" ]] && sudo_home="/home/$SUDO_USER"
+    user_home="$sudo_home"
+  fi
+  [[ -n "$user_home" ]] || return 1
+  printf "%s" "$user_home"
+}
+
+resolve_default_download_dir() {
+  if [[ -n "${BDTOOL_DOWNLOAD_DIR:-}" ]]; then
+    mkdir -p "$BDTOOL_DOWNLOAD_DIR"
+    [[ -d "$BDTOOL_DOWNLOAD_DIR" && -w "$BDTOOL_DOWNLOAD_DIR" ]] || return 1
+    printf "%s" "$BDTOOL_DOWNLOAD_DIR"
+    return 0
+  fi
+
+  local user_home=""
+  user_home="$(resolve_effective_home)" || return 1
+
+  local desktop_en="$user_home/Desktop"
+  local desktop_zh="$user_home/桌面"
+  local base_dir=""
+  if [[ -d "$desktop_en" ]]; then
+    base_dir="$desktop_en"
+  elif [[ -d "$desktop_zh" ]]; then
+    base_dir="$desktop_zh"
+  else
+    mkdir -p "$desktop_en"
+    base_dir="$desktop_en"
+  fi
+
+  local target="$base_dir/PT-BDtool"
+  mkdir -p "$target"
+  local probe="$target/.bdtool_write_probe.$$"
+  : > "$probe" || return 1
+  rm -f "$probe"
+  printf "%s" "$target"
+}
+
 ensure_output_root() {
   OUTPUT_ROOT="$(resolve_data_dir)/output"
   ERROR_FILE="$OUTPUT_ROOT/last_error.txt"

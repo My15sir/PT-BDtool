@@ -357,7 +357,9 @@ download_item() {
   local parent="${2:-}"
   local base src_parent zip_path tar_path
   src_parent="$(dirname "$out")"
-  [[ -n "$parent" ]] || parent="${BDTOOL_DOWNLOAD_DIR:-$HOME/Downloads/PT-BDtool}"
+  if [[ -z "$parent" ]]; then
+    parent="$(resolve_default_download_dir)" || return 1
+  fi
   mkdir -p "$parent"
   base="$(basename "$out")"
   zip_path="$parent/$base.zip"
@@ -377,7 +379,8 @@ download_item() {
 ask_download_dir() {
   local out_var="$1"
   local input=""
-  local default_dir="${BDTOOL_DOWNLOAD_DIR:-$HOME/Downloads/PT-BDtool}"
+  local default_dir=""
+  default_dir="$(resolve_default_download_dir)" || return 1
   if read_line "$(msg download_dir_prompt): " input; then
     if [[ -z "$input" ]]; then
       printf -v "$out_var" '%s' "$default_dir"
