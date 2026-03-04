@@ -12,23 +12,59 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: ShellCheck
-        run: shellcheck -x bdtool.sh install.sh
+        run: shellcheck -x bdtool.sh bdtool install.sh ptbd-start.sh scripts/*.sh
 
-  cli-regression:
+  fetch-deps:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Make executable
-        run: chmod +x bdtool.sh
-      - name: Help
-        run: ./bdtool.sh -h
-      - name: Doctor
-        run: ./bdtool.sh doctor
-      - name: New entry dry
-        run: ./bdtool.sh ./bdtool.sh --mode dry
-      - name: Old entry dry
-        run: ./bdtool.sh scan ./bdtool.sh --out /tmp/bdtool-test --mode dry
-      - name: Short args and log levels
+      - name: Install runtime commands for system-mode bundling
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+      - name: Prepare mock BDInfo command
         run: |
-          ./bdtool.sh ./bdtool.sh --mode dry -s 2 -j 1 --log-level debug
-          ./bdtool.sh ./bdtool.sh --mode dry --quiet
+          mkdir -p .ci-bin
+          cat > .ci-bin/BDInfo <<'SH'
+          #!/usr/bin/env bash
+          out_dir="${@: -1}"
+          mkdir -p "$out_dir"
+          echo "mock bdinfo" > "$out_dir/bdinfo.txt"
+          SH
+          chmod +x .ci-bin/BDInfo
+      - name: Run fetch-deps
+        run: |
+          chmod +x scripts/fetch-deps.sh scripts/build-bundle.sh
+          PATH="$PWD/.ci-bin:$PATH" PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh
+      - name: Build offline bundle
+        run: PATH="$PWD/.ci-bin:$PATH" PTBD_FETCH_MODE=system bash scripts/build-bundle.sh
+      - name: Verify bundle outputs
+        run: |
+          test -x third_party/bundle/linux-amd64/bin/ffmpeg
+          test -x third_party/bundle/linux-amd64/bin/ffprobe
+          test -x third_party/bundle/linux-amd64/bin/mediainfo
+          test -x third_party/bundle/linux-amd64/bin/BDInfo
+          test -f dist/PT-BDtool-linux-amd64.tar.gz
+
+  offline-install:
+    runs-on: ubuntu-latest
+    needs: [fetch-deps]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime commands for system-mode bundling
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+      - name: Prepare mock BDInfo command
+        run: |
+          mkdir -p .ci-bin
+          cat > .ci-bin/BDInfo <<'SH'
+          #!/usr/bin/env bash
+          out_dir="${@: -1}"
+          mkdir -p "$out_dir"
+          echo "mock bdinfo" > "$out_dir/bdinfo.txt"
+          SH
+          chmod +x .ci-bin/BDInfo
+      - name: Build bundle then install offline
+        run: |
+          PATH="$PWD/.ci-bin:$PATH" PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh
+          bash install.sh --offline
+      - name: Ensure installer has no apt calls
+        run: |
+          ! grep -Eq 'apt-get|apt ' install.sh

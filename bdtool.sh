@@ -9,6 +9,7 @@ BDTOOL_ROOT="$BT_SCRIPT_DIR"
 if [[ -f "$BT_SCRIPT_DIR/lib/ui.sh" ]]; then
   # shellcheck source=lib/ui.sh
   source "$BT_SCRIPT_DIR/lib/ui.sh"
+  setup_bundle_runtime "$BT_SCRIPT_DIR"
 else
   log_info() { printf "[INFO] %s\n" "$*" >&2; }
   log_warn() { printf "[WARN] %s\n" "$*" >&2; }
@@ -39,7 +40,10 @@ bt_debug() {
   [[ "$level" == "debug" ]] || return 0
   log_info "[$APP_NAME][DEBUG] $*"
 }
-bt_need_cmd() { command -v "$1" >/dev/null 2>&1 || bt_die "缺少依赖命令：$1"; }
+bt_need_cmd() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  bt_die "缺少依赖命令：$1。请先执行 scripts/fetch-deps.sh + scripts/build-bundle.sh，并重新安装离线包。"
+}
 
 bt_safe_name() {
   local s="$1"

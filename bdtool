@@ -4,6 +4,7 @@ set -Euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
+setup_bundle_runtime "$ROOT_DIR"
 
 : "${LANG_CODE:=zh}"
 : "${BDTOOL_NO_PROMPT:=0}"
@@ -297,17 +298,17 @@ generate_item() {
   mkdir -p "$out"
 
   if [[ "$type" == "VIDEO" ]]; then
-    if command -v mediainfo >/dev/null 2>&1; then
+    if require_runtime_cmd mediainfo; then
       if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
         echo "mediainfo 执行失败" > "$out/mediainfo.txt"
         has_error=1
       fi
     else
-      echo "未安装 mediainfo，使用占位信息。" > "$out/mediainfo.txt"
+      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
       has_error=1
     fi
 
-    if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+    if require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
       local duration dur_int i sec
       duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
       dur_int="${duration%.*}"
@@ -324,7 +325,7 @@ generate_item() {
     fi
     ensure_six_png "$out"
   else
-    if command -v BDInfo >/dev/null 2>&1; then
+    if require_runtime_cmd BDInfo; then
       if [[ "$type" == "BDMV" ]]; then
         if ! BDInfo -w "$src/BDMV" "$out" > "$out/bdinfo.txt" 2>/dev/null; then
           echo "BDInfo 执行失败" > "$out/bdinfo.txt"
@@ -656,3 +657,10 @@ main() {
 }
 
 main "$@"
+require_runtime_cmd() {
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 && return 0
+  screen_error "缺少依赖命令：$cmd"
+  screen_error "请先执行：bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh，然后重新安装离线包。"
+  return 1
+}

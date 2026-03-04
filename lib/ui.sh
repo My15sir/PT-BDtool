@@ -121,6 +121,30 @@ resolve_default_download_dir() {
   printf "%s" "$target"
 }
 
+setup_bundle_runtime() {
+  local app_root="${1:-}"
+  local bundle_dir="${PTBD_BUNDLE_DIR:-}"
+  if [[ -z "$bundle_dir" && -n "$app_root" ]]; then
+    bundle_dir="$app_root/third_party/bundle/linux-amd64"
+  fi
+  if [[ -z "$bundle_dir" ]]; then
+    bundle_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/third_party/bundle/linux-amd64"
+  fi
+
+  if [[ -d "$bundle_dir/bin" ]]; then
+    PATH="$bundle_dir/bin:$PATH"
+    export PATH
+  fi
+  if [[ -d "$bundle_dir/lib" ]]; then
+    LD_LIBRARY_PATH="$bundle_dir/lib:${LD_LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH
+  fi
+  if [[ -d "$bundle_dir" ]]; then
+    BDTOOL_BUNDLE_DIR="$bundle_dir"
+    export BDTOOL_BUNDLE_DIR
+  fi
+}
+
 ensure_output_root() {
   OUTPUT_ROOT="$(resolve_data_dir)/output"
   ERROR_FILE="$OUTPUT_ROOT/last_error.txt"

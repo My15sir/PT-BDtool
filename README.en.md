@@ -33,21 +33,17 @@ bdtool clean
 - Directory and single-file scanning
 - Parallel processing
 
-### Install
-
-One-line install:
+### Offline Build + Install
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
+bash scripts/fetch-deps.sh
+bash scripts/build-bundle.sh
+bash install.sh --offline
 ```
 
-Or clone:
-
-```bash
-git clone https://github.com/My15sir/PT-BDtool.git
-cd PT-BDtool
-bash install.sh
-```
+Notes:
+- Runtime does not use `apt-get` anymore.
+- Missing bundle dependencies will fail fast with actionable hints.
 
 ### Usage
 
@@ -119,6 +115,17 @@ bdtool-output/
 Notes:
 - `codex-run.sh` runs tests only by default.
 - To enable auto commit/push in that workflow, use `CODEX_RUN_GIT=1 ./codex-run.sh`.
+
+### Dependency Maintenance
+
+- Locked metadata: `scripts/deps.env`
+- SHA verification for remote artifacts: `scripts/fetch-deps.sh`
+- Suggested cadence: monthly or quarterly
+
+```bash
+bash scripts/update-deps.sh
+bash scripts/update-deps.sh --apply
+```
 
 ### License
 

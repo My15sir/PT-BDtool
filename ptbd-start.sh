@@ -10,6 +10,11 @@ on_err() {
 trap 'on_err $LINENO' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
+  # shellcheck source=lib/ui.sh
+  source "$SCRIPT_DIR/lib/ui.sh"
+  setup_bundle_runtime "$SCRIPT_DIR"
+fi
 
 echo "================================"
 echo "Starting PT-BDtool workflow..."

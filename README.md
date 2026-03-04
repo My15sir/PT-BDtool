@@ -6,43 +6,28 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
 ```
 
-## 安装与依赖（稳定机制）
+## 离线依赖与构建
 
-安装时会自动检查依赖：
-- `bash/find/awk/sed/sort/timeout/zip/tar/ffmpeg/ffprobe/mediainfo`
+本项目已切换为“构建时准备依赖，运行时离线可用”：
+- 构建阶段：`scripts/fetch-deps.sh`
+- 打包阶段：`scripts/build-bundle.sh`
+- 安装阶段：`bash install.sh --offline`
 
-行为：
-- 已安装：显示 `<依赖> 已安装`
-- 未安装：自动安装
+依赖会整理到：
+- `third_party/bundle/linux-amd64/bin`
+- `third_party/bundle/linux-amd64/lib`
 
-apt 稳定性策略：
-- `DEBIAN_FRONTEND=noninteractive`
-- `apt-get -y`
-- 默认 `-qq`（可 `APT_QUIET=0` 关闭）
-- 每步超时：`APT_TIMEOUT=300`
-- 重试：`APT_RETRY_MAX=3`（退避 1/2/4 秒）
-- 锁等待上限：`APT_LOCK_WAIT=60`
-- 安装期间每 10 秒输出一次：`仍在安装 <pkg> ...`
+## 安装（离线优先）
 
-当检测到 apt/dpkg 锁占用时：
-1. 识别占用进程
-2. `kill -TERM` -> 等 5 秒 -> `kill -KILL`
-3. 执行 `dpkg --configure -a`
-4. 继续安装
+```bash
+bash scripts/fetch-deps.sh
+bash scripts/build-bundle.sh
+bash install.sh --offline
+```
 
-`apt-get update` 失败时：
-- 不会无限卡住
-- 会继续尝试 `install` 一次
-- 若仍失败，写 `last_error.txt` 并给一句话提示
-
-## 自举（curl|bash）
-
-远程执行 `install.sh` 且本地缺仓库文件时，自动降级策略：
-1. `git clone --depth=1`
-2. tarball 下载 + 解压
-3. zipball 下载 + unzip
-
-每个策略都带超时与重试，并在失败时给出可操作建议。
+说明：
+- 安装时不再执行 `apt-get update/install`
+- 若离线依赖缺失会直接失败并提示先执行构建脚本
 
 ## 主菜单（严格单语，默认中文）
 
@@ -134,6 +119,17 @@ bdtool scan
 
 - `bdtool`：安装后的主入口（交互菜单）
 - `./bdtool.sh`：兼容脚本入口（CI/自动化更常用）
+
+## 依赖维护策略
+
+- 固定版本：依赖清单位于 `scripts/deps.env`
+- SHA 校验：远程下载依赖必须通过 SHA256（`scripts/fetch-deps.sh`）
+- 定期更新：建议每月或每季度执行：
+
+```bash
+bash scripts/update-deps.sh        # dry-run
+bash scripts/update-deps.sh --apply
+```
 
 ## 测试与工作流
 
