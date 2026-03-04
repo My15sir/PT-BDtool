@@ -8,10 +8,10 @@ source "$ROOT_DIR/lib/ui.sh"
 : "${LANG_CODE:=zh}"
 : "${BDTOOL_NO_PROMPT:=0}"
 : "${BDTOOL_DOWNLOAD_DIR:=}"
+: "${BDTOOL_SCAN_FULL_ROOT:=/}"
+: "${BDTOOL_DEBUG:=0}"
 
 ensure_output_root
-OUTPUT_INFO_ROOT="$OUTPUT_ROOT/信息"
-mkdir -p "$OUTPUT_INFO_ROOT"
 MAX_SCAN_DISPLAY=5
 BDTOOL_EXIT_REQUESTED=0
 
@@ -22,6 +22,11 @@ on_err() {
   exit "$rc"
 }
 trap on_err ERR
+
+dbg() {
+  [[ "$BDTOOL_DEBUG" == "1" ]] || return 0
+  screen "[DEBUG] $*"
+}
 
 msg() {
   local key="$1"
@@ -54,6 +59,7 @@ msg() {
       post_9) echo "9) Exit" ;;
       downloaded) echo "Downloaded: " ;;
       download_dir_prompt) echo "Download directory (empty = default)" ;;
+      post_hint_next) echo "Press Enter for next item, input 1 to continue this menu" ;;
       cleaned) echo "Cleaned: " ;;
       clean_missing) echo "Path not found, skip cleanup: " ;;
       op_ok) echo "Operation succeeded" ;;
@@ -93,6 +99,7 @@ msg() {
       post_9) echo "9) 退出" ;;
       downloaded) echo "已下载：" ;;
       download_dir_prompt) echo "下载目录（留空使用默认）" ;;
+      post_hint_next) echo "回车进入下一个条目，输入 1 继续当前结果处理" ;;
       cleaned) echo "已清理：" ;;
       clean_missing) echo "路径不存在，跳过清理：" ;;
       op_ok) echo "操作成功" ;;
@@ -138,11 +145,12 @@ safe_name() {
 }
 
 unique_dir() {
-  local base="$1"
-  local out="$OUTPUT_INFO_ROOT/$base"
+  local info_root="$1"
+  local base="$2"
+  local out="$info_root/$base"
   local idx=2
   while [[ -e "$out" ]]; do
-    out="$OUTPUT_INFO_ROOT/${base}_$idx"
+    out="$info_root/${base}_$idx"
     idx=$((idx + 1))
   done
   echo "$out"
@@ -190,6 +198,7 @@ collect_results() {
   local target="$1"
   local full="$2"
   local p type normalized
+  local full_root="${BDTOOL_SCAN_FULL_ROOT:-/}"
 
   SCAN_TYPES=()
   SCAN_ITEMS=()
@@ -197,6 +206,7 @@ collect_results() {
   declare -gA SCAN_SEEN=()
 
   if [[ "$full" == "1" ]]; then
+    dbg "full-scan root=$full_root"
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
@@ -216,8 +226,8 @@ collect_results() {
         SCAN_TYPES+=("$type")
         SCAN_ITEMS+=("$normalized")
       fi
-    done < <(find / -maxdepth 4 \
-      \( -path /proc -o -path /proc/* -o -path /sys -o -path /sys/* -o -path /dev -o -path /dev/* -o -path /run -o -path /run/* -o -path /tmp -o -path /tmp/* \) -prune -o \
+    done < <(find "$full_root" -maxdepth 4 \
+      \( -path "$full_root/proc" -o -path "$full_root/proc/*" -o -path "$full_root/sys" -o -path "$full_root/sys/*" -o -path "$full_root/dev" -o -path "$full_root/dev/*" -o -path "$full_root/run" -o -path "$full_root/run/*" -o -path "$full_root/tmp" -o -path "$full_root/tmp/*" \) -prune -o \
       \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   else
     while IFS= read -r p; do
@@ -273,18 +283,17 @@ show_results() {
 generate_item() {
   local type="$1"
   local src="$2"
-  local src_name safe out
+  local safe out
   local has_error=0
 
-  case "$type" in
-    VIDEO) src_name="$(basename "$(dirname "$src")")" ;;
-    BDMV) src_name="$(basename "$src")" ;;
-    ISO) src_name="$(basename "$(dirname "$src")")" ;;
-    *) src_name="unknown" ;;
-  esac
-
-  safe="$(safe_name "$src_name")"
-  out="$(unique_dir "$safe")"
+  resolve_source_output_layout "$type" "$src" || {
+    screen_error "输出路径计算失败：$type $src"
+    return 1
+  }
+  mkdir -p "$BDTOOL_SOURCE_INFO_ROOT"
+  safe="$(safe_name "$BDTOOL_SOURCE_GEN_NAME")"
+  out="$(unique_dir "$BDTOOL_SOURCE_INFO_ROOT" "$safe")"
+  dbg "output root=$BDTOOL_SOURCE_INFO_ROOT dir=$out type=$type src=$src"
   mkdir -p "$out"
 
   if [[ "$type" == "VIDEO" ]]; then
@@ -408,6 +417,7 @@ post_process_item() {
         ask_download_dir download_dir
         if download_item "$out" "$download_dir"; then
           screen "$(msg op_ok)"
+          screen "$(msg post_hint_next)"
         else
           screen_error "$(msg op_fail)"
         fi
@@ -419,7 +429,7 @@ post_process_item() {
           screen_error "$(msg op_fail)"
         fi
         ;;
-      0)
+      0|"")
         return 0
         ;;
       9|q|Q)
@@ -513,9 +523,14 @@ scan_menu() {
         screen "$(msg scan_warn_1)"
         screen "$(msg scan_warn_2)"
         read_line "$(msg scan_confirm): " c || return 0
-        if [[ "$c" == "1" ]]; then
+        c="$(echo "$c" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        dbg "full-scan confirm input='$c'"
+        if [[ "$c" == "1" || "${c,,}" == "y" || "${c,,}" == "yes" ]]; then
+          dbg "full-scan confirmed -> entering scan_flow"
           scan_flow "/" "1"
           [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
+        else
+          dbg "full-scan canceled -> back to scan menu"
         fi
         ;;
       2)
@@ -528,7 +543,15 @@ scan_menu() {
             break
           fi
           retry=$((retry + 1))
-          screen_error "$(msg dir_invalid)"
+          if [[ "$p" != /* ]]; then
+            screen_error "$(msg dir_invalid)（请使用绝对路径，例如 /home/$USER/Downloads）"
+          elif [[ ! -e "$p" ]]; then
+            screen_error "$(msg dir_invalid)（路径不存在：$p；示例：/home/$USER/Downloads）"
+          elif [[ ! -d "$p" ]]; then
+            screen_error "$(msg dir_invalid)（不是目录：$p；示例：/home/$USER/Downloads）"
+          else
+            screen_error "$(msg dir_invalid)（目录不可读：$p）"
+          fi
         done
         ;;
       0) return 0 ;;

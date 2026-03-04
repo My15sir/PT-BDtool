@@ -62,6 +62,42 @@ bt_mk_task_dir() {
   echo "$dir"
 }
 
+bt_unique_dir() {
+  local root="$1"
+  local base="$2"
+  local out="$root/$base"
+  local idx=2
+  while [[ -e "$out" ]]; do
+    out="$root/${base}_$idx"
+    idx=$((idx + 1))
+  done
+  echo "$out"
+}
+
+bt_prepare_output_layout() {
+  local src_type="$1"
+  local src_path="$2"
+  local out_override="${3:-}"
+  local label="${4:-$(basename "$src_path")}"
+  local safe_name
+
+  if [[ -n "$out_override" ]]; then
+    BT_JOB_DIR="$(bt_mk_task_dir "$out_override" "$label")"
+    BT_INFO_DIR="$BT_JOB_DIR/信息"
+    mkdir -p "$BT_INFO_DIR"
+    bt_debug "output layout=override job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
+    return 0
+  fi
+
+  resolve_source_output_layout "$src_type" "$src_path" || bt_die "无法计算输出路径：$src_type $src_path"
+  mkdir -p "$BDTOOL_SOURCE_INFO_ROOT"
+  safe_name="$(bt_safe_name "$BDTOOL_SOURCE_GEN_NAME")"
+  BT_JOB_DIR="$(bt_unique_dir "$BDTOOL_SOURCE_INFO_ROOT" "$safe_name")"
+  BT_INFO_DIR="$BT_JOB_DIR"
+  mkdir -p "$BT_INFO_DIR"
+  bt_debug "output layout=source-based root=$BDTOOL_SOURCE_INFO_ROOT job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
+}
+
 bt_is_positive_int() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
@@ -254,22 +290,21 @@ bt_run_with_jobs() {
 # =====================
 bt_process_video_file() {
   local video="$1"
-  local base_out="$2"
+  local base_out="${2:-}"
 
   local name
   name="$(basename "$video")"
 
-  local jobdir
-  jobdir="$(bt_mk_task_dir "$base_out" "$name")"
-  local info_dir="$jobdir/信息"
-  mkdir -p "$info_dir"
+  bt_prepare_output_layout "VIDEO" "$video" "$base_out" "$name"
+  local jobdir="$BT_JOB_DIR"
+  local info_dir="$BT_INFO_DIR"
 
   bt_log "VIDEO: $video"
   bt_log "OUT:   $jobdir"
   bt_log "OPTS:  mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N"
 
   if [[ "$OPT_MEDIAINFO" != "1" && "$OPT_SHOTS" != "1" ]]; then
-    echo "本次已关闭 mediainfo 与 screenshots，因此该目录为空（这是预期行为）。" > "$jobdir/README.txt"
+    echo "本次已关闭 mediainfo 与 screenshots，因此该目录为空（这是预期行为）。" > "$info_dir/README.txt"
     return 0
   fi
 
@@ -280,6 +315,17 @@ bt_process_video_file() {
   if [[ "$OPT_SHOTS" == "1" ]]; then
     bt_make_screenshots "$video" "$info_dir" "$OPT_SHOTS_N"
   fi
+
+  if [[ "$OPT_MEDIAINFO" == "1" && ! -s "$info_dir/mediainfo.txt" ]]; then
+    bt_die "生成失败：未发现有效 mediainfo.txt（$info_dir）"
+  fi
+  if [[ "$OPT_SHOTS" == "1" ]]; then
+    local i
+    for i in 1 2 3 4 5 6; do
+      [[ -s "$info_dir/$i.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/$i.png"
+    done
+  fi
+  bt_debug "artifact check ok type=VIDEO dir=$info_dir"
 
   bt_log "BDInfo: skipped (非 BDMV/ISO 输入)"
 }
@@ -299,23 +345,27 @@ bt_worker_entry() {
 # =====================
 bt_process_local_scan() {
   local scan_path="$1"
-  local out_base="$2"
-
-  mkdir -p "$out_base"
-  local task_out
-  task_out="$(bt_mk_task_dir "$out_base" "scan_$(bt_safe_name "$scan_path")")"
+  local out_base="${2:-}"
 
   bt_log "SCAN:  $scan_path"
-  bt_log "TASK:  $task_out"
+  if [[ -n "$out_base" ]]; then
+    bt_log "OUT:   override=$out_base"
+  else
+    bt_log "OUT:   auto=源文件上层目录/信息"
+  fi
   bt_log "OPTS:  mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS"
   bt_debug "scan_path_type=$( [[ -f "$scan_path" ]] && echo file || echo dir )"
 
   local bd_path=""
   if bd_path="$(bt_resolve_bd_path "$scan_path")"; then
-    local info_dir="$task_out/信息"
-    bt_run_bdinfo_report "$bd_path" "$info_dir"
+    local src_type="BDMV"
+    [[ -f "$bd_path" ]] && src_type="ISO"
+    bt_prepare_output_layout "$src_type" "$bd_path" "$out_base" "$(basename "$scan_path")"
+    bt_run_bdinfo_report "$bd_path" "$BT_INFO_DIR"
+    [[ -s "$BT_INFO_DIR/bdinfo.txt" ]] || bt_die "生成失败：未发现有效 bdinfo.txt（$BT_INFO_DIR）"
+    bt_debug "artifact check ok type=$src_type dir=$BT_INFO_DIR"
     bt_log "MediaInfo/Screenshots: skipped (BDMV/ISO 输入)"
-    echo "$task_out"
+    echo "$BT_JOB_DIR"
     return 0
   fi
 
@@ -323,9 +373,9 @@ bt_process_local_scan() {
     bt_is_video_file "$scan_path" || bt_die "不支持的文件类型：$scan_path（仅视频文件或 Blu-ray BDMV/ISO）"
     export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
     local worker_cmd
-    worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$task_out")"
+    worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
     execute_with_spinner "处理视频 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
-    echo "$task_out"
+    echo "DONE"
     return 0
   fi
 
@@ -340,7 +390,7 @@ bt_process_local_scan() {
   local v
   export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
   for v in "${video_list[@]}"; do
-    cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$task_out")")
+    cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
 
   if [[ "$OPT_JOBS" -le 1 ]]; then
@@ -352,7 +402,7 @@ bt_process_local_scan() {
     execute_with_spinner "并行处理 ${#cmds[@]} 个视频任务" bt_run_with_jobs "$OPT_JOBS" "${cmds[@]}" || bt_die "并行处理失败：$scan_path"
   fi
 
-  echo "$task_out"
+  echo "DONE"
 }
 
 # =====================
@@ -379,7 +429,7 @@ options:
   -s N               等价于 --shots N
   --jobs N           并行任务数（默认 1）
   -j N               等价于 --jobs N
-  --out DIR          输出目录（新入口默认 ./bdtool-output）
+  --out DIR          输出目录（默认按源路径上层目录/信息；显式指定时覆盖）
 
 examples:
   ./bdtool.sh movie.mkv
@@ -589,10 +639,7 @@ bt_main_scan() {
   fi
 
   [[ -e "$scan_path" ]] || bt_die "路径不存在：$scan_path。示例：./bdtool.sh ./movie.mkv --mode dry"
-  if [[ -z "$out_dir" ]]; then
-    out_dir="$(bt_infer_out_dir "$scan_path")"
-    bt_log "OUT(auto): $out_dir"
-  fi
+  [[ -n "$out_dir" ]] || bt_log "OUT(auto): 源文件上层目录/信息"
 
   bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL"
   OPT_SHOTS_N=6
@@ -652,9 +699,7 @@ bt_main() {
       ;;
     *)
       if [[ -e "$1" ]]; then
-        local default_out="./bdtool-output"
-        mkdir -p "$default_out"
-        bt_main_scan "$1" --out "$default_out" "${@:2}"
+        bt_main_scan "$1" "${@:2}"
       else
         bt_usage
         bt_die "未知命令或路径不存在：$1。示例：./bdtool.sh ./movie.mkv 或 ./bdtool.sh scan ./movie.mkv --out ./bdtool-output"

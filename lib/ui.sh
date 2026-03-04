@@ -162,3 +162,36 @@ run_ext() {
   wait "$pid"
   return $?
 }
+
+# Shared output layout resolver used by both `bdtool` and `bdtool.sh`.
+# Exports:
+# - BDTOOL_SOURCE_INFO_ROOT: "<source-parent>/信息"
+# - BDTOOL_SOURCE_GEN_NAME:  "<source-dir-name>"
+resolve_source_output_layout() {
+  local src_type="${1:-}"
+  local src_path="${2:-}"
+  local base_dir=""
+
+  [[ -n "$src_type" && -n "$src_path" ]] || return 1
+
+  case "$src_type" in
+    VIDEO|ISO)
+      base_dir="$(dirname "$src_path")"
+      ;;
+    BDMV)
+      if [[ "$(basename "$src_path")" == "BDMV" ]]; then
+        base_dir="$(dirname "$src_path")"
+      else
+        base_dir="$src_path"
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [[ -n "$base_dir" ]] || return 1
+  BDTOOL_SOURCE_INFO_ROOT="$(dirname "$base_dir")/信息"
+  BDTOOL_SOURCE_GEN_NAME="$(basename "$base_dir")"
+  [[ -n "$BDTOOL_SOURCE_INFO_ROOT" && -n "$BDTOOL_SOURCE_GEN_NAME" ]]
+}

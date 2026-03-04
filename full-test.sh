@@ -21,6 +21,12 @@ CLI_BIN="${BDTOOL_TEST_BIN:-}"
 MENU_BIN="$ROOT_DIR/bdtool"
 NOEMPTY_SAMPLE="$ROOT_DIR/.full-test-sample.mp4"
 NOEMPTY_OUT="$ROOT_DIR/bdtool-output/test-run-bdtool"
+PATHRULE_ROOT="$ROOT_DIR/.full-test-pathrule"
+PATHRULE_SRC_DIR="$PATHRULE_ROOT/srcdir"
+PATHRULE_SAMPLE="$PATHRULE_SRC_DIR/movie.mp4"
+FULLSCAN_ROOT="$ROOT_DIR/.full-test-fullscan"
+FULLSCAN_SRC_DIR="$FULLSCAN_ROOT/subdir"
+FULLSCAN_SAMPLE="$FULLSCAN_SRC_DIR/fullscan.mp4"
 
 if [[ -z "$CLI_BIN" ]]; then
   if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
@@ -35,6 +41,10 @@ fi
 
 # Minimal sample for dry-mode execution path validation.
 : > "$NOEMPTY_SAMPLE"
+rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT"
+mkdir -p "$PATHRULE_SRC_DIR" "$FULLSCAN_SRC_DIR"
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$PATHRULE_SAMPLE" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SAMPLE" -y
 
 write_log() {
   mkdir -p "$LOG_DIR"
@@ -123,9 +133,26 @@ run_step "version" success "$CLI_BIN" --version
 run_step "doctor" success "$CLI_BIN" doctor
 run_step "scan-dry-invalid-input" fail "$CLI_BIN" "$ROOT_DIR/bdtool.sh" --mode dry --out "$ROOT_DIR/bdtool-output/test-run"
 run_step "bdtool-dry-noempty" success "$MENU_BIN" "$NOEMPTY_SAMPLE" --mode dry --out "$NOEMPTY_OUT"
+run_step "default-out-pathrule-video" success "$CLI_BIN" "$PATHRULE_SAMPLE" --log-level debug
+run_step "fullscan-confirm-enters-flow" success bash -c "printf '1\n1\n1\n1\n0\n0\n3\n' | BDTOOL_SCAN_FULL_ROOT='$FULLSCAN_ROOT' '$MENU_BIN'"
 
 if ! find "$NOEMPTY_OUT" -type f -name 'README.txt' 2>/dev/null | grep -q .; then
   write_log "FULL TEST RESULT: FAIL (no output artifact for bdtool-dry-noempty)"
+  exit 1
+fi
+
+if ! find "$PATHRULE_ROOT/信息/srcdir" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q .; then
+  write_log "FULL TEST RESULT: FAIL (default output path rule mismatch for video)"
+  exit 1
+fi
+
+if ! find "$PATHRULE_ROOT/信息/srcdir" -type f -name '1.png' 2>/dev/null | grep -q .; then
+  write_log "FULL TEST RESULT: FAIL (default output artifact missing screenshot)"
+  exit 1
+fi
+
+if ! find "$FULLSCAN_ROOT/信息/subdir" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q .; then
+  write_log "FULL TEST RESULT: FAIL (full scan confirm did not enter scan_flow)"
   exit 1
 fi
 
@@ -143,3 +170,4 @@ fi
 
 write_log "FULL TEST RESULT: PASS"
 rm -f "$NOEMPTY_SAMPLE"
+rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT"
