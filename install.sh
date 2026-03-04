@@ -22,6 +22,59 @@ SKIPPED_COUNT=0
 log() { printf '[install] %s\n' "$*"; }
 err() { printf '[install][ERROR] %s\n' "$*" >&2; }
 
+print_bootstrap_commands() {
+  cat >&2 <<'EOF'
+[HINT] Copy-paste (normal user):
+  cd ~
+  git clone https://github.com/My15sir/PT-BDtool.git
+  cd PT-BDtool
+  bash scripts/fetch-deps.sh
+  bash scripts/build-bundle.sh
+  bash install.sh --offline
+
+[HINT] Copy-paste (root/sudo):
+  cd /opt
+  sudo git clone https://github.com/My15sir/PT-BDtool.git
+  cd PT-BDtool
+  sudo bash scripts/fetch-deps.sh
+  sudo bash scripts/build-bundle.sh
+  sudo bash install.sh --offline
+EOF
+}
+
+preflight_install_context() {
+  local missing=0
+  local req=""
+  local required_project_files=(
+    "$SCRIPT_DIR/bdtool"
+    "$SCRIPT_DIR/bdtool.sh"
+    "$SCRIPT_DIR/ptbd-start.sh"
+    "$SCRIPT_DIR/lib/ui.sh"
+    "$SCRIPT_DIR/lib/i18n.sh"
+    "$SCRIPT_DIR/scripts/fetch-deps.sh"
+    "$SCRIPT_DIR/scripts/build-bundle.sh"
+    "$SCRIPT_DIR/third_party/bundle/linux-amd64/bin"
+  )
+
+  for req in "${required_project_files[@]}"; do
+    if [[ ! -e "$req" ]]; then
+      err "missing required project file: $req"
+      missing=1
+    fi
+  done
+
+  if [[ "$missing" -ne 0 ]]; then
+    err "install.sh must run from a complete local PT-BDtool repository or extracted offline bundle."
+    print_bootstrap_commands
+    exit 1
+  fi
+
+  if [[ "$PWD" != "$SCRIPT_DIR" ]]; then
+    log "current directory is not project root; using script dir: $SCRIPT_DIR"
+    log "if you see 'scripts/*.sh: No such file or directory', run: cd \"$SCRIPT_DIR\""
+  fi
+}
+
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -142,6 +195,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+preflight_install_context
 
 required_bundle_files=(
   "$SCRIPT_DIR/third_party/bundle/linux-amd64/bin/ffmpeg"

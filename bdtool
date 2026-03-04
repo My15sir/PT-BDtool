@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 set -Euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_script_path() {
+  local src="$1"
+  local dir=""
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  echo "$src"
+}
+
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 # shellcheck source=lib/ui.sh
 source "$ROOT_DIR/lib/ui.sh"
 setup_bundle_runtime "$ROOT_DIR"
@@ -49,6 +61,8 @@ msg() {
       dir_prompt) echo "Enter directory" ;;
       dir_invalid) echo "Directory invalid" ;;
       none) echo "No items found" ;;
+      none_hint) echo "Supported scan targets: video files (*.mkv/*.mp4/... ), *.iso, or BDMV folders." ;;
+      dir_exec_file) echo "You entered an executable file path. Please enter a directory containing media files, e.g. /home/$USER/Downloads." ;;
       limit) echo "Only first 5 shown, others omitted" ;;
       pick) echo "Input index/indexes (e.g. 1 or 1 2 3, 0 back)" ;;
       pick_limit) echo "Too many invalid attempts" ;;
@@ -89,6 +103,8 @@ msg() {
       dir_prompt) echo "请输入目录" ;;
       dir_invalid) echo "目录无效" ;;
       none) echo "未发现可处理条目" ;;
+      none_hint) echo "可扫描类型：视频文件（*.mkv/*.mp4 等）、ISO 文件（*.iso）、BDMV 目录。" ;;
+      dir_exec_file) echo "你输入的是可执行文件路径，请输入包含媒体文件的目录，例如 /home/$USER/Downloads。" ;;
       limit) echo "仅显示前5条，其余已省略" ;;
       pick) echo "请输入序号（如 1 或 1 2 3，0 返回）" ;;
       pick_limit) echo "输入错误过多，已返回" ;;
@@ -262,6 +278,7 @@ show_results() {
 
   if (( total == 0 )); then
     screen "$(msg none)"
+    screen "$(msg none_hint)"
     return 1
   fi
 
@@ -551,6 +568,8 @@ scan_menu() {
             screen_error "$(msg dir_invalid)（请使用绝对路径，例如 /home/$USER/Downloads）"
           elif [[ ! -e "$p" ]]; then
             screen_error "$(msg dir_invalid)（路径不存在：$p；示例：/home/$USER/Downloads）"
+          elif [[ -f "$p" && -x "$p" ]]; then
+            screen_error "$(msg dir_exec_file)"
           elif [[ ! -d "$p" ]]; then
             screen_error "$(msg dir_invalid)（不是目录：$p；示例：/home/$USER/Downloads）"
           else

@@ -1,163 +1,80 @@
-# PT-BDtool
+# PT-BDtool (English)
 
-🇨🇳 [中文](README.md)
+For bilingual onboarding (CN/EN in one file), see `README.md`.
 
-A Bash tool for generating PT upload materials automatically.
+## Quick Start (Offline Only)
 
-### Quick Start
+Online one-liner install is deprecated and intentionally blocked:
 
 ```bash
-bash install.sh
-bdtool --help
-bdtool doctor
-bdtool /path/to/video_or_BDMV_or_iso
-bdtool clean
+bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
 ```
 
-### Entrypoints
+Use local-repo offline flow instead.
 
-- `bdtool`: main installed command (interactive menu style)
-- `./bdtool.sh`: script-style compatibility entry used in CI and automation
+## Copy-Paste Commands
 
-### Output Structure Rules
-
-- All reports and screenshots are stored in: `输出目录/信息/`
-- Screenshot files are fixed: `1.png~6.png`
-- `bdinfo.txt` is generated only for BDMV/ISO
-
-### Features
-
-- Generate MediaInfo automatically
-- Generate BDInfo for Blu-ray sources (BDMV/ISO)
-- Capture screenshots automatically
-- Directory and single-file scanning
-- Parallel processing
-
-### Offline Build + Install
+### Normal user
 
 ```bash
+cd ~
+git clone https://github.com/My15sir/PT-BDtool.git
+cd PT-BDtool
 bash scripts/fetch-deps.sh
 bash scripts/build-bundle.sh
 bash install.sh --offline
+export PATH="$HOME/.local/bin:$PATH"
+bdtool
 ```
 
-Notes:
-- Runtime does not use `apt-get` anymore.
-- Missing bundle dependencies will fail fast with actionable hints.
-- Install now performs explicit prechecks for `ffmpeg/ffprobe/mediainfo/BDInfo`.
-- Unchanged files are skipped with `copied/skipped/elapsed` statistics.
-
-### Install Precheck and Skip Policy
-
-- Precheck output:
-  - `dependency present: ...` means ready and continues.
-  - `dependency missing: ...` means install stops immediately with a fix command.
-- Skip behavior:
-  - Single files: skip copy when source and destination are identical.
-  - Bundle cache: skip `bin/lib` sync when required binaries match by SHA.
-- Failure hint:
-  - Run `bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`.
-
-### Speed / Cache Notes
-
-- Incremental copy avoids redundant overwrite.
-- Bundle cache hit avoids full dependency tree copy.
-- Install logs include measurable timing, for example:
-
-```text
-[install] precheck done (elapsed=0s)
-[install] install stage done (elapsed=1s, copied=3, skipped=5)
-[install] total elapsed: 1s
-```
-
-### FAQ: Why Were Some Steps Skipped?
-
-- `skip (unchanged)`: destination file already matches source.
-- `skip (bundle cached)`: offline bundle already matches current build.
-- This is expected and intended to reduce install time.
-
-### Usage
-
-Preferred entry:
+### VPS/root (with sudo)
 
 ```bash
-bdtool /path/to/videos
+cd /opt
+sudo git clone https://github.com/My15sir/PT-BDtool.git
+cd PT-BDtool
+sudo bash scripts/fetch-deps.sh
+sudo bash scripts/build-bundle.sh
+sudo bash install.sh --offline
+bdtool
 ```
 
-Compatibility entry:
+## Troubleshooting
+
+### `/dev/fd/... offline dependency missing`
+
+You are running installer via fd/stdin (`bash <(curl ...)`).  
+Clone the repo and run `bash install.sh --offline` locally.
+
+### `scripts/*.sh: No such file or directory`
+
+You are not in repo root. Run:
 
 ```bash
-./bdtool.sh scan /path/to/videos --out output
+cd ~/PT-BDtool
+ls scripts
 ```
 
-Dry mode:
+### `bdtool: command not found`
+
+Add local bin to PATH:
 
 ```bash
-./bdtool.sh /path/to/videos --mode dry
+export PATH="$HOME/.local/bin:$PATH"
+bdtool --help
 ```
 
-Version:
+### Startup abnormal or scan finds nothing
+
+Fallback:
 
 ```bash
-./bdtool.sh --version
+ptbd-start
 ```
 
-### Output Example
+Supported scan targets:
+- videos: `*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
+- Blu-ray: `BDMV` directory
+- image: `*.iso`
 
-```text
-bdtool-output/
-└── 20260303_xxxxxx__scan_xxx
-    └── 20260303_xxxxxx__movie.mkv
-        └── 信息/
-            ├── mediainfo.txt
-            ├── 1.png
-            ├── 2.png
-            ├── 3.png
-            ├── 4.png
-            ├── 5.png
-            └── 6.png
-```
-
-### Requirements
-
-- bash
-- ffmpeg
-- ffprobe
-- mediainfo
-- BDInfoCLI-ng (`BDInfo` command, for BDMV/ISO)
-
-### BDInfoCLI Install
-
-- On Linux x64, `install.sh` installs the prebuilt package (`BDInfo-linux-x64.tar.gz`) automatically.
-- Manual source: `tetrahydroc/BDInfoCLI` Releases.
-
-### Contributing
-
-- This is an AI-generated project.
-- Issues / feature requests / pull requests are currently not accepted.
-
-### Test
-
-```bash
-./full-test.sh
-./codex-run.sh
-```
-
-Notes:
-- `codex-run.sh` runs tests only by default.
-- To enable auto commit/push in that workflow, use `CODEX_RUN_GIT=1 ./codex-run.sh`.
-
-### Dependency Maintenance
-
-- Locked metadata: `scripts/deps.env`
-- SHA verification for remote artifacts: `scripts/fetch-deps.sh`
-- Suggested cadence: monthly or quarterly
-
-```bash
-bash scripts/update-deps.sh
-bash scripts/update-deps.sh --apply
-```
-
-### License
-
-MIT License
+If you entered executable path like `/opt/PT-BDtool/bdtool`, use a media directory instead.

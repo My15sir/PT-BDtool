@@ -108,6 +108,34 @@ export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
 ```
 
+### 4) 启动异常或扫描无结果 / startup works but scan returns nothing
+CN：
+- 若 `bdtool` 启动异常，可先用 `ptbd-start` 兜底：
+```bash
+ptbd-start
+```
+- 若提示“未发现可处理条目”，请确认扫描目录中包含以下类型：
+  - 视频：`*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
+  - 蓝光：`BDMV` 目录
+  - 镜像：`*.iso`
+- 如果你输入了 `/opt/PT-BDtool/bdtool` 这类程序文件路径，请改为媒体目录，例如：
+```bash
+/home/<user>/Downloads
+```
+EN:
+- If `bdtool` startup is abnormal, try fallback:
+```bash
+ptbd-start
+```
+- If you get "No items found", ensure the target directory contains:
+  - Videos: `*.mkv *.mp4 *.avi *.mov *.ts *.m2ts *.wmv *.webm *.mpg *.mpeg`
+  - Blu-ray: `BDMV` folder
+  - Images: `*.iso`
+- If you entered a program path such as `/opt/PT-BDtool/bdtool`, use a media directory instead, for example:
+```bash
+/home/<user>/Downloads
+```
+
 ## Verify Installation（安装验证）
 
 ### CN

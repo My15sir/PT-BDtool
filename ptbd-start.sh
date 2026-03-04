@@ -11,7 +11,19 @@ on_err() {
 }
 trap 'on_err "${LINENO}" "$?"' ERR
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_script_path() {
+  local src="$1"
+  local dir=""
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  echo "$src"
+}
+
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
   # shellcheck source=lib/ui.sh
   source "$SCRIPT_DIR/lib/ui.sh"
