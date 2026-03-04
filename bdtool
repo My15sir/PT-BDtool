@@ -52,7 +52,7 @@ msg() {
       limit) echo "Only first 5 shown, others omitted" ;;
       pick) echo "Input index/indexes (e.g. 1 or 1 2 3, 0 back)" ;;
       pick_limit) echo "Too many invalid attempts" ;;
-      done) echo "Generated: " ;;
+      gen_done) echo "Generated: " ;;
       post_title) echo "Post process" ;;
       post_1) echo "1) Download result package" ;;
       post_2) echo "2) Cleanup generated files" ;;
@@ -92,7 +92,7 @@ msg() {
       limit) echo "仅显示前5条，其余已省略" ;;
       pick) echo "请输入序号（如 1 或 1 2 3，0 返回）" ;;
       pick_limit) echo "输入错误过多，已返回" ;;
-      done) echo "生成完成：" ;;
+      gen_done) echo "生成完成：" ;;
       post_title) echo "结果处理" ;;
       post_1) echo "1) 下载结果包" ;;
       post_2) echo "2) 清理生成文件" ;;
@@ -344,10 +344,10 @@ generate_item() {
   fi
 
   if [[ "$has_error" -eq 0 ]]; then
-    screen "$(msg done)$out"
+    screen "$(msg gen_done)$out"
     screen "$(msg op_ok)"
   else
-    screen "$(msg done)$out"
+    screen "$(msg gen_done)$out"
     screen_error "$(msg op_fail)"
   fi
   LAST_OUTPUT_DIR="$out"

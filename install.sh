@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OFFLINE_MODE=1
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+case "$SCRIPT_SOURCE" in
+  ""|"-"|/dev/fd/*|/proc/self/fd/*|/dev/stdin)
+    cat >&2 <<'EOF'
+[ERROR] install.sh is running from a file descriptor/stdin path and cannot resolve offline bundle files.
+[ERROR] Please run install.sh from a local PT-BDtool directory or extracted release bundle.
+[HINT]  git clone https://github.com/My15sir/PT-BDtool.git && cd PT-BDtool && bash install.sh --offline
+EOF
+    exit 2
+    ;;
+esac
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 LANG_OVERRIDE=""
 NON_INTERACTIVE=0
 
@@ -21,11 +31,10 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --offline)
-      OFFLINE_MODE=1
       shift
       ;;
     --online-legacy)
-      echo "[ERROR] Online apt installation is disabled. Use offline bundle only." >&2
+      echo "[ERROR] Online package-manager installation is disabled. Use offline bundle only." >&2
       exit 2
       ;;
     --lang)

@@ -22,7 +22,7 @@ else
   validate_int_range() { local v="${1:-}" min="${2:-1}" max="${3:-65535}"; [[ "$v" =~ ^[0-9]+$ ]] && (( v >= min && v <= max )); }
   ensure_log_dir() { local root="${1:-$BT_SCRIPT_DIR}"; BDTOOL_ROOT="$root"; BDTOOL_LOG_DIR="$root/bdtool-output/logs"; BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"; mkdir -p "$BDTOOL_LOG_DIR"; touch "$BDTOOL_RUN_LOG"; }
   setup_log_redirection() { ensure_log_dir "${1:-$BT_SCRIPT_DIR}"; [[ "${BDTOOL_LOG_REDIRECTED:-0}" == "1" ]] && return 0; BDTOOL_LOG_REDIRECTED=1; exec > >(tee -a "$BDTOOL_RUN_LOG") 2> >(tee -a "$BDTOOL_RUN_LOG" >&2); }
-  execute_with_spinner() { local m="$1"; shift; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; "$@" >> "$BDTOOL_RUN_LOG" 2>&1; local r=$?; [[ "$r" -eq 0 ]] && log_success "$m 完成" || log_err "$m 失败 (请查看 $BDTOOL_RUN_LOG)"; return "$r"; }
+  execute_with_spinner() { local m="$1"; shift; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; "$@" >> "$BDTOOL_RUN_LOG" 2>&1; local r=$?; if [[ "$r" -eq 0 ]]; then log_success "$m 完成"; else log_err "$m 失败 (请查看 $BDTOOL_RUN_LOG)"; fi; return "$r"; }
   die() { local m="${1:-执行失败}" c="${2:-1}"; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; log_err "$m"; log_err "详情日志：$BDTOOL_RUN_LOG"; exit "$c"; }
 fi
 
@@ -207,7 +207,13 @@ bt_run_mediainfo_report() {
 
   bt_need_cmd mediainfo
   mkdir -p "$info_dir"
-  execute_with_spinner "生成 MediaInfo" bash -c 'mediainfo "$1" > "$2"' _ "$video" "$info_dir/mediainfo.txt" || bt_die "MediaInfo 生成失败：$video"
+  execute_with_spinner "生成 MediaInfo" bt_write_mediainfo "$video" "$info_dir/mediainfo.txt" || bt_die "MediaInfo 生成失败：$video"
+}
+
+bt_write_mediainfo() {
+  local video="$1"
+  local out_file="$2"
+  mediainfo "$video" > "$out_file"
 }
 
 bt_run_bdinfo_report() {
