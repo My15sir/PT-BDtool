@@ -18,6 +18,9 @@ touch "$RUN_LOG" "$FULL_LOG"
 
 TIMEOUT_SECONDS="${BDTOOL_CMD_TIMEOUT:-300}"
 CLI_BIN="${BDTOOL_TEST_BIN:-}"
+MENU_BIN="$ROOT_DIR/bdtool"
+NOEMPTY_SAMPLE="$ROOT_DIR/.full-test-sample.mp4"
+NOEMPTY_OUT="$ROOT_DIR/bdtool-output/test-run-bdtool"
 
 if [[ -z "$CLI_BIN" ]]; then
   if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
@@ -29,6 +32,9 @@ if [[ -z "$CLI_BIN" ]]; then
     exit 1
   fi
 fi
+
+# Minimal sample for dry-mode execution path validation.
+: > "$NOEMPTY_SAMPLE"
 
 write_log() {
   mkdir -p "$LOG_DIR"
@@ -116,6 +122,13 @@ run_step "help" success "$CLI_BIN" --help
 run_step "version" success "$CLI_BIN" --version
 run_step "doctor" success "$CLI_BIN" doctor
 run_step "scan-dry-invalid-input" fail "$CLI_BIN" "$ROOT_DIR/bdtool.sh" --mode dry --out "$ROOT_DIR/bdtool-output/test-run"
+run_step "bdtool-dry-noempty" success "$MENU_BIN" "$NOEMPTY_SAMPLE" --mode dry --out "$NOEMPTY_OUT"
+
+if ! find "$NOEMPTY_OUT" -type f -name 'README.txt' 2>/dev/null | grep -q .; then
+  write_log "FULL TEST RESULT: FAIL (no output artifact for bdtool-dry-noempty)"
+  exit 1
+fi
+
 run_step "clean" success "$CLI_BIN" clean
 run_step "bad-args" fail "$CLI_BIN" unknown-command
 
@@ -129,3 +142,4 @@ if awk -F '\t' '$2 != "PASS"{found=1} END{exit found ? 0 : 1}' "$RESULTS_TSV"; t
 fi
 
 write_log "FULL TEST RESULT: PASS"
+rm -f "$NOEMPTY_SAMPLE"
