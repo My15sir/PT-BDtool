@@ -28,6 +28,37 @@ bash install.sh --offline
 说明：
 - 安装时不再执行 `apt-get update/install`
 - 若离线依赖缺失会直接失败并提示先执行构建脚本
+- 安装前会逐项检查 `ffmpeg/ffprobe/mediainfo/BDInfo` 是否已在离线 bundle 中可执行
+- 安装阶段对未变化文件执行“跳过”，并输出 `copied/skipped/elapsed` 统计
+
+## 安装前检查与跳过策略
+
+- 预检查输出：
+  - `dependency present: ...` 表示已满足，继续安装
+  - `dependency missing: ...` 表示缺失，安装会立即终止并给出修复命令
+- 跳过策略：
+  - 单文件：源与目标一致时跳过复制
+  - 依赖 bundle：目标已有且关键二进制校验一致时跳过整包同步
+- 失败提示：
+  - 缺失依赖会明确提示执行：`bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
+
+## 加速机制 / 缓存机制
+
+- 增量复制：避免每次安装都重复覆盖相同文件
+- bundle 缓存命中：关键二进制 SHA 一致时跳过 `bin/lib` 全量复制
+- 可量化日志：安装输出包含阶段耗时与总耗时，例如：
+
+```text
+[install] precheck done (elapsed=0s)
+[install] install stage done (elapsed=1s, copied=3, skipped=5)
+[install] total elapsed: 1s
+```
+
+## 常见问题：为何某些步骤被跳过？
+
+- 显示 `skip (unchanged)`：表示目标文件与源文件一致，无需重复复制
+- 显示 `skip (bundle cached)`：表示离线依赖包已命中缓存，关键二进制未变化
+- 这属于预期行为，用于减少安装耗时；若需强制刷新，可先删除安装目录再执行安装
 
 ## 主菜单（严格单语，默认中文）
 

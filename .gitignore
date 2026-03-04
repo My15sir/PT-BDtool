@@ -21,6 +21,7 @@ node_modules/
 *~
 .DS_Store
 Thumbs.db
+.ci-bin/
 
 # Local backups
 *.bak
