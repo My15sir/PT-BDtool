@@ -1,192 +1,165 @@
-# PT-BDtool（极简稳定版）
+# PT-BDtool
 
-## 一行安装
+PT 上传素材生成工具（Bash）。  
+PT upload material generator (Bash).
 
+## Quick Start（快速开始）
+
+### CN
+- 本项目现在是**纯离线安装流程**：先在本地仓库准备依赖，再执行安装。
+- 不再支持在线一键安装（`bash <(curl ... install.sh)`）。
+
+### EN
+- This project now uses an **offline-only install flow**: prepare dependencies in a local repo, then install.
+- Online one-liner install (`bash <(curl ... install.sh)`) is no longer supported.
+
+## Offline Install Only（仅支持离线安装）
+
+### CN
+旧方式已废弃（不要再用）：
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
 ```
+上面命令会在 `/dev/fd` 场景失败，这是预期保护行为。
 
-## 离线依赖与构建
-
-本项目已切换为“构建时准备依赖，运行时离线可用”：
-- 构建阶段：`scripts/fetch-deps.sh`
-- 打包阶段：`scripts/build-bundle.sh`
-- 安装阶段：`bash install.sh --offline`
-
-依赖会整理到：
-- `third_party/bundle/linux-amd64/bin`
-- `third_party/bundle/linux-amd64/lib`
-
-## 安装（离线优先）
-
+### EN
+Deprecated method (do not use):
 ```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/My15sir/PT-BDtool/main/install.sh)
+```
+This fails by design in `/dev/fd` mode to prevent broken offline installs.
+
+## Copy-Paste Commands（可直接复制执行）
+
+### A) 普通用户 / Normal user
+```bash
+cd ~
+git clone https://github.com/My15sir/PT-BDtool.git
+cd PT-BDtool
 bash scripts/fetch-deps.sh
 bash scripts/build-bundle.sh
 bash install.sh --offline
-```
-
-说明：
-- 安装时不再执行 `apt-get update/install`
-- 若离线依赖缺失会直接失败并提示先执行构建脚本
-- 安装前会逐项检查 `ffmpeg/ffprobe/mediainfo/BDInfo` 是否已在离线 bundle 中可执行
-- 安装阶段对未变化文件执行“跳过”，并输出 `copied/skipped/elapsed` 统计
-
-## 安装前检查与跳过策略
-
-- 预检查输出：
-  - `dependency present: ...` 表示已满足，继续安装
-  - `dependency missing: ...` 表示缺失，安装会立即终止并给出修复命令
-- 跳过策略：
-  - 单文件：源与目标一致时跳过复制
-  - 依赖 bundle：目标已有且关键二进制校验一致时跳过整包同步
-- 失败提示：
-  - 缺失依赖会明确提示执行：`bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
-
-## 加速机制 / 缓存机制
-
-- 增量复制：避免每次安装都重复覆盖相同文件
-- bundle 缓存命中：关键二进制 SHA 一致时跳过 `bin/lib` 全量复制
-- 可量化日志：安装输出包含阶段耗时与总耗时，例如：
-
-```text
-[install] precheck done (elapsed=0s)
-[install] install stage done (elapsed=1s, copied=3, skipped=5)
-[install] total elapsed: 1s
-```
-
-## 常见问题：为何某些步骤被跳过？
-
-- 显示 `skip (unchanged)`：表示目标文件与源文件一致，无需重复复制
-- 显示 `skip (bundle cached)`：表示离线依赖包已命中缓存，关键二进制未变化
-- 这属于预期行为，用于减少安装耗时；若需强制刷新，可先删除安装目录再执行安装
-
-## 主菜单（严格单语，默认中文）
-
-仅保留：
-1. 扫描
-2. 切换语言
-3. 退出
-
-## 扫描系统
-
-### 二级菜单
-1. 扫描全盘
-2. 扫描指定目录
-0. 返回
-
-### 扫描规则
-- 全盘根目录：`/`
-- 默认排除：`/proc /sys /dev /run /tmp`
-- 默认 `find -xdev` 防跨挂载（`SCAN_XDEV=0` 可关闭）
-- 全盘扫描有二次确认
-- 指定目录最多重试 3 次
-
-### 结果展示
-- 最多显示 5 条
-- 超过 5 条提示：`仅显示前5条，其余已省略`
-
-### 多选
-支持输入：
-- 单选：`1`
-- 多选：`1 2 3`
-- 返回：`0`
-
-## 生成产物目录结构
-
-统一保存到：
-
-```text
-<OUTPUT_ROOT>/信息/<源文件目录名>/
-```
-
-规则：
-- 视频：`mediainfo.txt + 1..6.png`
-- 原盘/ISO：`bdinfo.txt`
-- 视频/ISO：目录名取“父目录名”
-- BDMV：目录名取“目录名”
-- 目录名安全化：空格->`_`，非法字符去除，长度≤64
-- 冲突自动追加 `_2/_3`
-- 视频截图不足 6 张时用最后一张补齐
-
-## 下载与清理
-
-生成完成后可选：
-1. 下载结果（zip）
-2. 返回
-
-下载目录：
-
-```text
-~/Downloads/PT-BDtool/
-```
-
-下载后可选清理：
-- 仅清理本次缓存/临时目录
-- 不删除源文件
-
-## 错误文件
-
-默认不写 run.log/ui.log。
-
-仅出错时生成：
-
-```text
-<OUTPUT_ROOT>/last_error.txt
-```
-
-## 常用命令
-
-```bash
+export PATH="$HOME/.local/bin:$PATH"
 bdtool
-bdtool --lang en
+```
+
+### B) VPS/root（有 sudo）/ VPS or root (with sudo)
+```bash
+cd /opt
+sudo git clone https://github.com/My15sir/PT-BDtool.git
+cd PT-BDtool
+sudo bash scripts/fetch-deps.sh
+sudo bash scripts/build-bundle.sh
+sudo bash install.sh --offline
+bdtool
+```
+
+说明 / Notes:
+- CN：普通用户默认安装到 `~/.local/share/pt-bdtool/PT-BDtool-app`，命令软链到 `~/.local/bin`。
+- EN: Non-root install target is `~/.local/share/pt-bdtool/PT-BDtool-app`, with symlink in `~/.local/bin`.
+- CN：root/sudo 安装默认落到 `/opt/PT-BDtool`，命令软链到 `/usr/local/bin`。
+- EN: root/sudo install target is `/opt/PT-BDtool`, with symlink in `/usr/local/bin`.
+
+## Minimal Newbie Path（新手最小路径）
+
+### CN
+1. 打开终端，先执行 `cd ~`。  
+2. 克隆仓库：`git clone ...`。  
+3. 进入目录：`cd PT-BDtool`。  
+4. 依次执行：`fetch-deps -> build-bundle -> install --offline`。  
+5. 执行 `bdtool` 启动。  
+
+### EN
+1. Open terminal and run `cd ~` first.  
+2. Clone the repo: `git clone ...`.  
+3. Enter project folder: `cd PT-BDtool`.  
+4. Run in order: `fetch-deps -> build-bundle -> install --offline`.  
+5. Start with `bdtool`.  
+
+## Troubleshooting（常见报错排查）
+
+### 1) `/dev/fd/... offline dependency missing`
+CN：你使用了 `bash <(curl ...)` 或 stdin/fd 方式运行安装脚本。请改为“先克隆仓库，再在本地目录执行 `bash install.sh --offline`”。  
+EN: You ran installer via `bash <(curl ...)` or fd/stdin mode. Use local repo install: clone first, then run `bash install.sh --offline`.
+
+### 2) `scripts/*.sh: No such file or directory`
+CN：当前目录不在仓库根目录。先执行：
+```bash
+cd ~/PT-BDtool
+ls scripts
+```
+确认存在 `fetch-deps.sh`、`build-bundle.sh` 后再执行。  
+EN: You are not in project root. Run:
+```bash
+cd ~/PT-BDtool
+ls scripts
+```
+Make sure `fetch-deps.sh` and `build-bundle.sh` exist, then rerun.
+
+### 3) `bdtool: command not found`
+CN：安装后 PATH 里没有 `~/.local/bin`（普通用户场景）。执行：
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+bdtool --help
+```
+EN: `~/.local/bin` is not in PATH (non-root install). Run:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+bdtool --help
+```
+
+## Verify Installation（安装验证）
+
+### CN
+```bash
 bdtool --help
 bdtool doctor
-bdtool clean
-./bdtool.sh --version
-bdtool scan
 ```
+期望看到帮助信息与依赖检查结果。
 
-## 入口说明
-
-- `bdtool`：安装后的主入口（交互菜单）
-- `./bdtool.sh`：兼容脚本入口（CI/自动化更常用）
-
-## 依赖维护策略
-
-- 固定版本：依赖清单位于 `scripts/deps.env`
-- SHA 校验：远程下载依赖必须通过 SHA256（`scripts/fetch-deps.sh`）
-- 定期更新：建议每月或每季度执行：
-
+### EN
 ```bash
-bash scripts/update-deps.sh        # dry-run
+bdtool --help
+bdtool doctor
+```
+Expected: help output and dependency check result.
+
+## Install Precheck / Skip Behavior（安装预检查与跳过策略）
+
+### CN
+- 预检查会输出 `dependency present` / `dependency missing`。
+- 未变化文件会输出 `skip (unchanged)`。
+- 依赖包命中缓存会输出 `skip (bundle cached)`。
+- 缺失依赖时会明确提示执行：
+  `bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
+
+### EN
+- Precheck prints `dependency present` / `dependency missing`.
+- Unchanged files print `skip (unchanged)`.
+- Cached dependency bundle prints `skip (bundle cached)`.
+- If dependencies are missing, installer prints:
+  `bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh`
+
+## Entrypoints（入口）
+
+### CN
+- `bdtool`：安装后的主入口。
+- `./bdtool.sh`：兼容脚本入口（CI/自动化常用）。
+
+### EN
+- `bdtool`: main command after install.
+- `./bdtool.sh`: compatibility entry for CI/automation.
+
+## Dependency Maintenance（依赖维护）
+
+### CN
+```bash
+bash scripts/update-deps.sh
 bash scripts/update-deps.sh --apply
 ```
 
-## 测试与工作流
-
+### EN
 ```bash
-./full-test.sh
-./codex-run.sh
+bash scripts/update-deps.sh
+bash scripts/update-deps.sh --apply
 ```
-
-说明：
-- `codex-run.sh` 默认仅执行测试，不自动提交/推送。
-- 如需自动提交与推送：`CODEX_RUN_GIT=1 ./codex-run.sh`
-
-## 仓库清理与目录规范
-
-本仓库已完成一次“瘦身清理”，核心运行文件保持不变：
-- `install.sh`
-- `bdtool`
-- `lib/`
-- `README.md`
-
-清理策略：
-- 删除运行生成目录与历史产物（如 `bdtool-output/`、历史报告、临时日志）
-- 删除本地备份文件（`*.bak`）与不再使用的旧包装脚本
-- 保留 `bdtool.sh`，避免影响现有 CI 流程
-
-目录规范（后续提交建议）：
-- 源码与脚本：保留在仓库根目录与 `lib/`
-- 运行输出：统一写入 `bdtool-output/`（由 `.gitignore` 忽略）
-- 临时文件与日志：写入 `tmp/`、`logs/`（由 `.gitignore` 忽略）
