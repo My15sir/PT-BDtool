@@ -126,3 +126,21 @@ bdtool --lang en
 bdtool scan
 bdtool --help
 ```
+
+## 仓库清理与目录规范
+
+本仓库已完成一次“瘦身清理”，核心运行文件保持不变：
+- `install.sh`
+- `bdtool`
+- `lib/`
+- `README.md`
+
+清理策略：
+- 删除运行生成目录与历史产物（如 `bdtool-output/`、历史报告、临时日志）
+- 删除本地备份文件（`*.bak`）与不再使用的旧包装脚本
+- 保留 `bdtool.sh`，避免影响现有 CI 流程
+
+目录规范（后续提交建议）：
+- 源码与脚本：保留在仓库根目录与 `lib/`
+- 运行输出：统一写入 `bdtool-output/`（由 `.gitignore` 忽略）
+- 临时文件与日志：写入 `tmp/`、`logs/`（由 `.gitignore` 忽略）

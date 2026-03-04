@@ -1,6 +1,0 @@
-help	PASS	0
-doctor	PASS	0
-install-dry	PASS	0
-scan	PASS	0
-clean	PASS	0
-bad-args	FAIL	1
