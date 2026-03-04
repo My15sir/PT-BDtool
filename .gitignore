@@ -1,17 +1,26 @@
-# 产物目录（脚本生成）
+# Runtime output
+bdtool-output/
 out/
 output/
 reports/
+logs/
+tmp/
+cache/
+dist/
+build/
 
-# 截图（按你的命名）
-截图_*.png
-截图_*.jpg
+# Python/Node caches
+__pycache__/
+.pytest_cache/
+node_modules/
 
-# 报告
-*.txt
-*.bd.txt
-
-# 临时
+# Temporary/editor files
 *.log
-.tmp/
-REFACTOR_SPEC.md
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local backups
+*.bak
