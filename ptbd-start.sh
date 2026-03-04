@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck disable=SC2317
+# This function is only reached via the ERR trap.
 on_err() {
-  local rc="$?"
-  local line="${BASH_LINENO[0]:-unknown}"
+  local line="${1:-unknown}"
+  local rc="${2:-1}"
   echo "[ERROR] Start workflow failed at line ${line} (rc=${rc})" >&2
   exit "$rc"
 }
-trap on_err ERR
+trap 'on_err "${LINENO}" "$?"' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
