@@ -365,6 +365,7 @@ bdtool scan <path> --out <dir> [options]  # 兼容入口
 bdtool doctor
 bdtool status  Check installation status
 bdtool version
+bdtool start   Start interactive workflow
 bdtool install
 bdtool clean
 
@@ -393,6 +394,17 @@ USAGE
 
 bt_cmd_version() {
   echo "$APP_NAME $BT_VERSION"
+}
+
+bt_cmd_start() {
+  local launcher="$BT_SCRIPT_DIR/ptbd-start.sh"
+  if [[ -x "$launcher" ]]; then
+    exec "$launcher"
+  fi
+  if command -v bdtool >/dev/null 2>&1; then
+    exec bdtool
+  fi
+  bt_die "未找到启动入口：请确认已安装或存在 ptbd-start.sh"
 }
 
 bt_cmd_doctor() {
@@ -623,6 +635,10 @@ bt_main() {
     install)
       shift
       bt_cmd_install
+      ;;
+    start)
+      shift
+      bt_cmd_start
       ;;
     clean)
       shift

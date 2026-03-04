@@ -7,11 +7,13 @@ source "$ROOT_DIR/lib/ui.sh"
 
 : "${LANG_CODE:=zh}"
 : "${BDTOOL_NO_PROMPT:=0}"
+: "${BDTOOL_DOWNLOAD_DIR:=}"
 
 ensure_output_root
 OUTPUT_INFO_ROOT="$OUTPUT_ROOT/信息"
 mkdir -p "$OUTPUT_INFO_ROOT"
 MAX_SCAN_DISPLAY=5
+BDTOOL_EXIT_REQUESTED=0
 
 on_err() {
   local rc=$?
@@ -49,9 +51,13 @@ msg() {
       post_1) echo "1) Download result package" ;;
       post_2) echo "2) Cleanup generated files" ;;
       post_0) echo "0) Next item" ;;
+      post_9) echo "9) Exit" ;;
       downloaded) echo "Downloaded: " ;;
+      download_dir_prompt) echo "Download directory (empty = default)" ;;
       cleaned) echo "Cleaned: " ;;
       clean_missing) echo "Path not found, skip cleanup: " ;;
+      op_ok) echo "Operation succeeded" ;;
+      op_fail) echo "Operation failed" ;;
       bye) echo "Bye" ;;
       type_video) echo "video" ;;
       type_bdmv) echo "bluray" ;;
@@ -84,9 +90,13 @@ msg() {
       post_1) echo "1) 下载结果包" ;;
       post_2) echo "2) 清理生成文件" ;;
       post_0) echo "0) 下一个条目" ;;
+      post_9) echo "9) 退出" ;;
       downloaded) echo "已下载：" ;;
+      download_dir_prompt) echo "下载目录（留空使用默认）" ;;
       cleaned) echo "已清理：" ;;
       clean_missing) echo "路径不存在，跳过清理：" ;;
+      op_ok) echo "操作成功" ;;
+      op_fail) echo "操作失败" ;;
       bye) echo "已退出" ;;
       type_video) echo "视频" ;;
       type_bdmv) echo "原盘" ;;
@@ -264,6 +274,7 @@ generate_item() {
   local type="$1"
   local src="$2"
   local src_name safe out
+  local has_error=0
 
   case "$type" in
     VIDEO) src_name="$(basename "$(dirname "$src")")" ;;
@@ -278,9 +289,13 @@ generate_item() {
 
   if [[ "$type" == "VIDEO" ]]; then
     if command -v mediainfo >/dev/null 2>&1; then
-      mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null || echo "mediainfo 执行失败" > "$out/mediainfo.txt"
+      if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
+        echo "mediainfo 执行失败" > "$out/mediainfo.txt"
+        has_error=1
+      fi
     else
       echo "未安装 mediainfo，使用占位信息。" > "$out/mediainfo.txt"
+      has_error=1
     fi
 
     if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
@@ -291,31 +306,49 @@ generate_item() {
       (( dur_int < 12 )) && dur_int=12
       for i in 1 2 3 4 5 6; do
         sec=$(( (dur_int * i) / 7 ))
-        ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1 || true
+        if ! ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1; then
+          has_error=1
+        fi
       done
+    else
+      has_error=1
     fi
     ensure_six_png "$out"
   else
     if command -v BDInfo >/dev/null 2>&1; then
       if [[ "$type" == "BDMV" ]]; then
-        BDInfo -w "$src/BDMV" "$out" > "$out/bdinfo.txt" 2>/dev/null || echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+        if ! BDInfo -w "$src/BDMV" "$out" > "$out/bdinfo.txt" 2>/dev/null; then
+          echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+          has_error=1
+        fi
       else
-        BDInfo -w "$src" "$out" > "$out/bdinfo.txt" 2>/dev/null || echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+        if ! BDInfo -w "$src" "$out" > "$out/bdinfo.txt" 2>/dev/null; then
+          echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+          has_error=1
+        fi
       fi
     else
       echo "未安装 BDInfo，使用占位信息。" > "$out/bdinfo.txt"
+      has_error=1
     fi
   fi
 
-  screen "$(msg done)$out"
+  if [[ "$has_error" -eq 0 ]]; then
+    screen "$(msg done)$out"
+    screen "$(msg op_ok)"
+  else
+    screen "$(msg done)$out"
+    screen_error "$(msg op_fail)"
+  fi
   LAST_OUTPUT_DIR="$out"
 }
 
 download_item() {
   local out="$1"
-  local base parent src_parent zip_path tar_path
+  local parent="${2:-}"
+  local base src_parent zip_path tar_path
   src_parent="$(dirname "$out")"
-  parent="$HOME/Downloads/PT-BDtool"
+  [[ -n "$parent" ]] || parent="${BDTOOL_DOWNLOAD_DIR:-$HOME/Downloads/PT-BDtool}"
   mkdir -p "$parent"
   base="$(basename "$out")"
   zip_path="$parent/$base.zip"
@@ -330,6 +363,21 @@ download_item() {
   tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
   screen "$(msg downloaded)$tar_path"
   return 0
+}
+
+ask_download_dir() {
+  local out_var="$1"
+  local input=""
+  local default_dir="${BDTOOL_DOWNLOAD_DIR:-$HOME/Downloads/PT-BDtool}"
+  if read_line "$(msg download_dir_prompt): " input; then
+    if [[ -z "$input" ]]; then
+      printf -v "$out_var" '%s' "$default_dir"
+    else
+      printf -v "$out_var" '%s' "$input"
+    fi
+  else
+    printf -v "$out_var" '%s' "$default_dir"
+  fi
 }
 
 cleanup_item() {
@@ -352,15 +400,30 @@ post_process_item() {
     menu_option "$(msg post_1)"
     menu_option "$(msg post_2)"
     menu_option "$(msg post_0)"
+    menu_option "$(msg post_9)"
     read_line "$(msg prompt): " c || return 0
     case "$c" in
       1)
-        download_item "$out" || screen_error "$(msg invalid)"
+        local download_dir=""
+        ask_download_dir download_dir
+        if download_item "$out" "$download_dir"; then
+          screen "$(msg op_ok)"
+        else
+          screen_error "$(msg op_fail)"
+        fi
         ;;
       2)
-        cleanup_item "$out"
+        if cleanup_item "$out"; then
+          screen "$(msg op_ok)"
+        else
+          screen_error "$(msg op_fail)"
+        fi
         ;;
       0)
+        return 0
+        ;;
+      9|q|Q)
+        BDTOOL_EXIT_REQUESTED=1
         return 0
         ;;
       *)
@@ -404,6 +467,9 @@ handle_multi_select() {
   for idx in "${selected[@]}"; do
     generate_item "${SCAN_TYPES[idx-1]}" "${SCAN_ITEMS[idx-1]}"
     post_process_item "$LAST_OUTPUT_DIR"
+    if [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]]; then
+      return 0
+    fi
   done
 
   return 0
@@ -422,6 +488,7 @@ scan_flow() {
     read_line "$(msg pick): " pick || return 0
     handle_multi_select "$pick"
     rc=$?
+    [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
     if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then
       return 0
     fi
@@ -448,6 +515,7 @@ scan_menu() {
         read_line "$(msg scan_confirm): " c || return 0
         if [[ "$c" == "1" ]]; then
           scan_flow "/" "1"
+          [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
         fi
         ;;
       2)
@@ -456,6 +524,7 @@ scan_menu() {
           read_line "$(msg dir_prompt): " p || return 0
           if [[ -d "$p" && -r "$p" ]]; then
             scan_flow "$p" "0"
+            [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
             break
           fi
           retry=$((retry + 1))
@@ -481,7 +550,7 @@ main_menu() {
       2)
         if [[ "$LANG_CODE" == "zh" ]]; then LANG_CODE="en"; else LANG_CODE="zh"; fi
         ;;
-      3|q|Q)
+      3|9|q|Q)
         screen "$(msg bye)"
         return 0
         ;;

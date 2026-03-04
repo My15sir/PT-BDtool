@@ -1,31 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+on_err() {
+  local rc="$?"
+  local line="${1:-unknown}"
+  echo ""
+  echo "[ERROR] Workflow failed at line ${line} (rc=${rc})"
+  exit "$rc"
+}
+trap 'on_err $LINENO' ERR
+
+log_step() {
+  echo ""
+  echo "$1"
+}
+
 echo "=============================="
 echo "Running Codex workflow"
 echo "=============================="
 
-echo ""
-echo "[1/4] Running tests..."
+log_step "[1/4] Running tests..."
 ./codex-test.sh
 
-echo ""
-echo "[2/4] Tests passed"
+log_step "[2/4] Tests passed"
 
-if [[ "${CODEX_RUN_GIT:-0}" == "1" ]]; then
-  echo ""
-  echo "[3/4] Creating git commit..."
-  git add .
-  git commit -m "auto: codex update" || echo "Nothing to commit"
+log_step "[3/4] Creating git commit..."
+git add .
+git commit --allow-empty -m "auto: codex update"
 
-  echo ""
-  echo "[4/4] Pushing to GitHub..."
-  git push origin main
-else
-  echo ""
-  echo "[3/4] Skipping git commit (set CODEX_RUN_GIT=1 to enable)"
-  echo "[4/4] Skipping git push (set CODEX_RUN_GIT=1 to enable)"
-fi
+log_step "[4/4] Pushing to GitHub..."
+git push origin main
 
 echo ""
 echo "Workflow complete"

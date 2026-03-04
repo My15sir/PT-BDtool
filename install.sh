@@ -455,17 +455,20 @@ install_target_root() {
 
   mkdir -p "$target_root/lib"
   cp -f "$SCRIPT_DIR/bdtool" "$target_root/bdtool"
+  cp -f "$SCRIPT_DIR/ptbd-start.sh" "$target_root/ptbd-start.sh" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/install.sh" "$target_root/install.sh"
   cp -f "$SCRIPT_DIR/README.md" "$target_root/README.md" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/lib/ui.sh" "$target_root/lib/ui.sh"
   cp -f "$SCRIPT_DIR/lib/i18n.sh" "$target_root/lib/i18n.sh"
-  chmod +x "$target_root/bdtool" "$target_root/install.sh"
+  chmod +x "$target_root/bdtool" "$target_root/install.sh" "$target_root/ptbd-start.sh" 2>/dev/null || chmod +x "$target_root/bdtool" "$target_root/install.sh"
 
   if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then
     ln -sf "$target_root/bdtool" /usr/local/bin/bdtool
+    ln -sf "$target_root/ptbd-start.sh" /usr/local/bin/ptbd-start 2>/dev/null || true
   else
     mkdir -p "$HOME/.local/bin"
     ln -sf "$target_root/bdtool" "$HOME/.local/bin/bdtool"
+    ln -sf "$target_root/ptbd-start.sh" "$HOME/.local/bin/ptbd-start" 2>/dev/null || true
     printf "请确保 ~/.local/bin 在 PATH 中。\n" >&2
   fi
 
