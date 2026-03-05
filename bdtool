@@ -46,7 +46,8 @@ find_app_root() {
   return 1
 }
 
-SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
+SCRIPT_PATH="$(resolve_script_path "$SCRIPT_SOURCE")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(find_app_root "$SCRIPT_DIR" || true)"
 if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
