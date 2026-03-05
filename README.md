@@ -72,6 +72,23 @@ find ./bdtool-output/demo-run -type f -name 'README.txt'
 ```
 成功时会看到什么：`find` 输出一条 `README.txt` 路径。
 
+## 音乐文件生成频谱图（复制即用）
+
+作用：使用音频输入直接生成 `频谱图_1.png` 与 `mediainfo_1.txt`。
+```bash
+set -euo pipefail
+cd ~/PT-BDtool
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p ./bdtool-output/audio-demo
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "sine=frequency=1000:duration=8" ./demo-audio.wav
+bdtool ./demo-audio.wav --out ./bdtool-output/audio-demo
+info_dir="$(find ./bdtool-output/audio-demo -type d -name 信息 | head -n 1)"
+test -s "$info_dir/频谱图_1.png"
+test -s "$info_dir/mediainfo_1.txt"
+find "$info_dir" -maxdepth 1 -type f -printf '%f\n' | sort
+```
+成功时会看到什么：输出中包含 `频谱图_1.png` 与 `mediainfo_1.txt`，且二者非空。
+
 ## 常见报错一键排查（复制即用）
 
 ### 1) `/usr/local/bin/lib/ui.sh: No such file or directory`

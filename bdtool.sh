@@ -95,8 +95,12 @@ bt_debug() {
   log_info "[$APP_NAME][DEBUG] $*"
 }
 bt_need_cmd() {
-  command -v "$1" >/dev/null 2>&1 && return 0
-  bt_die "缺少依赖命令：$1。请先执行 scripts/fetch-deps.sh + scripts/build-bundle.sh，并重新安装离线包。"
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 && return 0
+  if [[ "$cmd" == "ffmpeg" ]]; then
+    bt_die "缺少依赖命令：ffmpeg。可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo；然后执行 bash install.sh --offline"
+  fi
+  bt_die "缺少依赖命令：$cmd。请先执行 scripts/fetch-deps.sh + scripts/build-bundle.sh，并重新安装离线包。"
 }
 
 bt_safe_name() {
@@ -172,12 +176,30 @@ bt_find_video_files() {
   \) 2>/dev/null | sort -u
 }
 
+bt_find_audio_files() {
+  local base="$1"
+  find "$base" -type f \( \
+    -iname "*.mp3" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.m4a" -o \
+    -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" \
+  \) 2>/dev/null | sort -u
+}
+
 bt_is_video_file() {
   local p="$1"
   local l
   l="$(echo "$p" | tr '[:upper:]' '[:lower:]')"
   case "$l" in
     *.mkv|*.mp4|*.m2ts|*.ts|*.avi|*.mov|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+bt_is_audio_file() {
+  local p="$1"
+  local l
+  l="$(echo "$p" | tr '[:upper:]' '[:lower:]')"
+  case "$l" in
+    *.mp3|*.flac|*.wav|*.m4a|*.aac|*.ogg|*.opus) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -310,6 +332,27 @@ bt_finalize_video_artifacts() {
   [[ "$cnt" == "7" ]] || bt_die "生成失败：产物数量异常（期望7，实际$cnt）：$info_dir"
 }
 
+bt_make_audio_spectrum() {
+  local audio="$1"
+  local info_dir="$2"
+  bt_need_cmd ffmpeg
+  mkdir -p "$info_dir"
+  execute_with_spinner "生成频谱图" ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$info_dir/频谱图_1.png" || bt_die "频谱图生成失败：$audio"
+}
+
+bt_finalize_audio_artifacts() {
+  local info_dir="$1"
+  local keep_re='^频谱图_1\.png$|^mediainfo_1\.txt$'
+  local f cnt
+  [[ -s "$info_dir/频谱图_1.png" ]] || bt_die "生成失败：缺少有效频谱图 $info_dir/频谱图_1.png"
+  [[ -s "$info_dir/mediainfo_1.txt" ]] || bt_die "生成失败：缺少有效信息文件 $info_dir/mediainfo_1.txt"
+  while IFS= read -r f; do
+    [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
+  done < <(find "$info_dir" -maxdepth 1 -type f -printf '%f\n')
+  cnt="$(find "$info_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "2" ]] || bt_die "生成失败：音频产物数量异常（期望2，实际$cnt）：$info_dir"
+}
+
 # =====================
 # Module: defaults/config
 # =====================
@@ -416,6 +459,25 @@ bt_process_video_file() {
   bt_log "BDInfo: skipped (非 BDMV/ISO 输入)"
 }
 
+bt_process_audio_file() {
+  local audio="$1"
+  local base_out="${2:-}"
+  local name
+  name="$(basename "$audio")"
+
+  # Reuse source-based output layout (same as video inputs).
+  bt_prepare_output_layout "VIDEO" "$audio" "$base_out" "$name"
+  local info_dir="$BT_INFO_DIR"
+
+  bt_log "AUDIO: $audio"
+  bt_log "OUT:   $BT_JOB_DIR"
+
+  bt_run_mediainfo_report "$audio" "$info_dir"
+  bt_make_audio_spectrum "$audio" "$info_dir"
+  bt_finalize_audio_artifacts "$info_dir"
+  bt_debug "artifact check ok type=AUDIO dir=$info_dir"
+}
+
 bt_worker_entry() {
   OPT_MEDIAINFO="${OPT_MEDIAINFO:-1}"
   OPT_SHOTS="${OPT_SHOTS:-1}"
@@ -423,7 +485,11 @@ bt_worker_entry() {
 
   local video="$1"
   local out_base="$2"
-  bt_process_video_file "$video" "$out_base"
+  if bt_is_audio_file "$video"; then
+    bt_process_audio_file "$video" "$out_base"
+  else
+    bt_process_video_file "$video" "$out_base"
+  fi
 }
 
 # =====================
@@ -456,7 +522,9 @@ bt_process_local_scan() {
   fi
 
   if [[ -f "$scan_path" ]]; then
-    bt_is_video_file "$scan_path" || bt_die "不支持的文件类型：$scan_path（仅视频文件或 Blu-ray BDMV/ISO）"
+    if ! bt_is_video_file "$scan_path" && ! bt_is_audio_file "$scan_path"; then
+      bt_die "不支持的文件类型：$scan_path（仅视频/音频文件或 Blu-ray BDMV/ISO）"
+    fi
     export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
@@ -465,17 +533,20 @@ bt_process_local_scan() {
     return 0
   fi
 
-  local video_list=()
+  local media_list=()
   while IFS= read -r vf; do
-    [[ -n "$vf" ]] && video_list+=("$vf")
+    [[ -n "$vf" ]] && media_list+=("$vf")
   done < <(bt_find_video_files "$scan_path")
+  while IFS= read -r af; do
+    [[ -n "$af" ]] && media_list+=("$af")
+  done < <(bt_find_audio_files "$scan_path")
 
-  [[ "${#video_list[@]}" -gt 0 ]] || bt_die "未发现视频文件：$scan_path"
+  [[ "${#media_list[@]}" -gt 0 ]] || bt_die "未发现可处理媒体文件：$scan_path"
 
   local cmds=()
   local v
   export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
-  for v in "${video_list[@]}"; do
+  for v in "${media_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
 
@@ -519,6 +590,7 @@ options:
 
 examples:
   ./bdtool.sh movie.mkv
+  ./bdtool.sh song.flac
   ./bdtool.sh /data/videos -s 6 -j 2
   ./bdtool.sh movie.mkv --log-level debug
   ./bdtool.sh scan /data/videos --out output

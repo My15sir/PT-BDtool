@@ -125,7 +125,7 @@ msg() {
       dir_prompt) echo "Enter directory" ;;
       dir_invalid) echo "Directory invalid" ;;
       none) echo "No items found" ;;
-      none_hint) echo "Supported scan targets: video files (*.mkv/*.mp4/... ), *.iso, or BDMV folders." ;;
+      none_hint) echo "Supported scan targets: video/audio files (*.mkv/*.mp4/*.mp3/... ), *.iso, or BDMV folders." ;;
       dir_exec_file) echo "You entered an executable file path. Please enter a directory containing media files, e.g. /home/$USER/Downloads." ;;
       limit) echo "Only first 5 shown, others omitted" ;;
       pick) echo "Input index/indexes (e.g. 1 or 1 2 3, 0 back)" ;;
@@ -145,6 +145,7 @@ msg() {
       op_fail) echo "Operation failed" ;;
       bye) echo "Bye" ;;
       type_video) echo "video" ;;
+      type_audio) echo "audio" ;;
       type_bdmv) echo "bluray" ;;
       type_iso) echo "iso" ;;
       *) echo "$key" ;;
@@ -167,7 +168,7 @@ msg() {
       dir_prompt) echo "请输入目录" ;;
       dir_invalid) echo "目录无效" ;;
       none) echo "未发现可处理条目" ;;
-      none_hint) echo "可扫描类型：视频文件（*.mkv/*.mp4 等）、ISO 文件（*.iso）、BDMV 目录。" ;;
+      none_hint) echo "可扫描类型：视频/音频文件（*.mkv/*.mp4/*.mp3 等）、ISO 文件（*.iso）、BDMV 目录。" ;;
       dir_exec_file) echo "你输入的是可执行文件路径，请输入包含媒体文件的目录，例如 /home/$USER/Downloads。" ;;
       limit) echo "仅显示前5条，其余已省略" ;;
       pick) echo "请输入序号（如 1 或 1 2 3，0 返回）" ;;
@@ -187,6 +188,7 @@ msg() {
       op_fail) echo "操作失败" ;;
       bye) echo "已退出" ;;
       type_video) echo "视频" ;;
+      type_audio) echo "音频" ;;
       type_bdmv) echo "原盘" ;;
       type_iso) echo "ISO" ;;
       *) echo "$key" ;;
@@ -290,6 +292,28 @@ is_video() {
   esac
 }
 
+is_audio() {
+  case "${1,,}" in
+    *.mp3|*.flac|*.wav|*.m4a|*.aac|*.ogg|*.opus) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+finalize_audio_output() {
+  local dir="$1"
+  local keep_re='^频谱图_1\.png$|^mediainfo_1\.txt$'
+  local file cnt
+  for file in "$dir"/*; do
+    [[ -f "$file" ]] || continue
+    if [[ ! "$(basename "$file")" =~ $keep_re ]]; then
+      rm -f -- "$file"
+    fi
+  done
+  cnt="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "2" ]] || return 1
+  return 0
+}
+
 collect_results() {
   local target="$1"
   local full="$2"
@@ -314,6 +338,9 @@ collect_results() {
       elif is_video "$p"; then
         type="VIDEO"
         normalized="$p"
+      elif is_audio "$p"; then
+        type="AUDIO"
+        normalized="$p"
       else
         continue
       fi
@@ -324,7 +351,7 @@ collect_results() {
       fi
     done < <(find "$full_root" -maxdepth 4 \
       \( -path "$full_root/proc" -o -path "$full_root/proc/*" -o -path "$full_root/sys" -o -path "$full_root/sys/*" -o -path "$full_root/dev" -o -path "$full_root/dev/*" -o -path "$full_root/run" -o -path "$full_root/run/*" -o -path "$full_root/tmp" -o -path "$full_root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   else
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
@@ -337,6 +364,9 @@ collect_results() {
       elif is_video "$p"; then
         type="VIDEO"
         normalized="$p"
+      elif is_audio "$p"; then
+        type="AUDIO"
+        normalized="$p"
       else
         continue
       fi
@@ -347,7 +377,7 @@ collect_results() {
       fi
     done < <(find "$target" \
       \( -path "$target/proc" -o -path "$target/proc/*" -o -path "$target/sys" -o -path "$target/sys/*" -o -path "$target/dev" -o -path "$target/dev/*" -o -path "$target/run" -o -path "$target/run/*" -o -path "$target/tmp" -o -path "$target/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   fi
 }
 
@@ -365,6 +395,7 @@ show_results() {
   for ((i=1; i<=show_n; i++)); do
     case "${SCAN_TYPES[i-1]}" in
       VIDEO) label="$(msg type_video)" ;;
+      AUDIO) label="$(msg type_audio)" ;;
       BDMV) label="$(msg type_bdmv)" ;;
       ISO) label="$(msg type_iso)" ;;
       *) label="${SCAN_TYPES[i-1]}" ;;
@@ -421,6 +452,25 @@ generate_item() {
     fi
     ensure_six_png "$out"
     finalize_video_output "$out" || has_error=1
+  elif [[ "$type" == "AUDIO" ]]; then
+    if require_runtime_cmd mediainfo; then
+      if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
+        echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
+        has_error=1
+      fi
+    else
+      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
+      has_error=1
+    fi
+
+    if require_runtime_cmd ffmpeg; then
+      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$out/频谱图_1.png" >/dev/null 2>&1; then
+        has_error=1
+      fi
+    else
+      has_error=1
+    fi
+    finalize_audio_output "$out" || has_error=1
   else
     if require_runtime_cmd BDInfo; then
       if [[ "$type" == "BDMV" ]]; then
@@ -760,6 +810,11 @@ main "$@"
 require_runtime_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 && return 0
+  if [[ "$cmd" == "ffmpeg" ]]; then
+    screen_error "缺少依赖命令：ffmpeg"
+    screen_error "可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo"
+    return 1
+  fi
   screen_error "缺少依赖命令：$cmd"
   screen_error "请先执行：bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh，然后重新安装离线包。"
   return 1

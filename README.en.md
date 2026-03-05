@@ -56,6 +56,23 @@ echo "PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)"
 ```
 Expected success: prints `PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)`.
 
+## Music Input -> Spectrum Image (Copy/Paste)
+
+Purpose: process an audio file and generate `频谱图_1.png` + `mediainfo_1.txt`.
+```bash
+set -euo pipefail
+cd ~/PT-BDtool
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p ./bdtool-output/audio-demo
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "sine=frequency=1000:duration=8" ./demo-audio.wav
+bdtool ./demo-audio.wav --out ./bdtool-output/audio-demo
+info_dir="$(find ./bdtool-output/audio-demo -type d -name 信息 | head -n 1)"
+test -s "$info_dir/频谱图_1.png"
+test -s "$info_dir/mediainfo_1.txt"
+find "$info_dir" -maxdepth 1 -type f -printf '%f\n' | sort
+```
+Expected success: output list includes `频谱图_1.png` and `mediainfo_1.txt` (both non-empty).
+
 ## Common Error Fix
 
 Purpose: fix stale wrappers (`/usr/local/bin/lib/ui.sh` not found or undefined function errors).
