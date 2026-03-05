@@ -20,6 +20,8 @@ fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
+pt --help
+pts --help
 ```
 成功时会看到什么：最后输出 `用法: bdtool [--lang zh|en]` 或 `bdtool <path> [options]`。
 
@@ -46,12 +48,16 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 command -v bdtool
 command -v ptbd-start
+command -v pt
+command -v pts
 bdtool --help >/dev/null
 bdtool doctor
 ptbd-start --help >/dev/null
-echo "PT-BDtool self-check PASS"
+pt --help >/dev/null
+pts --help >/dev/null
+echo "PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)"
 ```
-成功时会看到什么：最后输出 `PT-BDtool self-check PASS`。
+成功时会看到什么：最后输出 `PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)`。
 
 ## 最小使用流程（安装后跑通一次）
 

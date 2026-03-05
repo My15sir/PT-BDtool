@@ -158,14 +158,20 @@ install_entrypoints() {
   local bin_dir="$2"
   local bdtool_link="$bin_dir/bdtool"
   local start_link="$bin_dir/ptbd-start"
+  local pt_link="$bin_dir/pt"
+  local pts_link="$bin_dir/pts"
 
   mkdir -p "$bin_dir"
   # Force-replace stale copied wrappers (regular files) from old versions.
   [[ -e "$bdtool_link" && ! -L "$bdtool_link" ]] && rm -f "$bdtool_link"
   [[ -e "$start_link" && ! -L "$start_link" ]] && rm -f "$start_link"
+  [[ -e "$pt_link" && ! -L "$pt_link" ]] && rm -f "$pt_link"
+  [[ -e "$pts_link" && ! -L "$pts_link" ]] && rm -f "$pts_link"
 
   ln -sfn "$install_root/bdtool" "$bdtool_link"
   ln -sfn "$install_root/ptbd-start.sh" "$start_link"
+  ln -sfn "$install_root/bdtool" "$pt_link"
+  ln -sfn "$install_root/ptbd-start.sh" "$pts_link"
 }
 
 post_install_self_check() {
@@ -175,6 +181,8 @@ post_install_self_check() {
   local f=""
   local resolved_bdtool=""
   local resolved_start=""
+  local resolved_pt=""
+  local resolved_pts=""
   local required_files=(
     "$install_root/bdtool"
     "$install_root/bdtool.sh"
@@ -209,6 +217,18 @@ post_install_self_check() {
     err "self-check missing entrypoint: $bin_dir/ptbd-start"
     fail=1
   fi
+  if [[ -x "$bin_dir/pt" ]]; then
+    log "self-check ok: entrypoint $bin_dir/pt"
+  else
+    err "self-check missing entrypoint: $bin_dir/pt"
+    fail=1
+  fi
+  if [[ -x "$bin_dir/pts" ]]; then
+    log "self-check ok: entrypoint $bin_dir/pts"
+  else
+    err "self-check missing entrypoint: $bin_dir/pts"
+    fail=1
+  fi
 
   if ! "$install_root/bdtool" --help >/dev/null 2>&1; then
     err "self-check failed: $install_root/bdtool --help"
@@ -226,6 +246,14 @@ post_install_self_check() {
     err "self-check failed: $bin_dir/ptbd-start --help"
     fail=1
   fi
+  if ! "$bin_dir/pt" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/pt --help"
+    fail=1
+  fi
+  if ! "$bin_dir/pts" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/pts --help"
+    fail=1
+  fi
 
   resolved_bdtool="$(command -v bdtool 2>/dev/null || true)"
   if [[ -n "$resolved_bdtool" && "$resolved_bdtool" != "$bin_dir/bdtool" ]]; then
@@ -239,21 +267,37 @@ post_install_self_check() {
     err "copy-paste fix: rm -f \"$resolved_start\" && hash -r && \"$bin_dir/ptbd-start\" --help"
     fail=1
   fi
+  resolved_pt="$(command -v pt 2>/dev/null || true)"
+  if [[ -n "$resolved_pt" && "$resolved_pt" != "$bin_dir/pt" ]]; then
+    err "PATH entry mismatch: command -v pt -> $resolved_pt (expected $bin_dir/pt)"
+    err "copy-paste fix: rm -f \"$resolved_pt\" && hash -r && \"$bin_dir/pt\" --help"
+    fail=1
+  fi
+  resolved_pts="$(command -v pts 2>/dev/null || true)"
+  if [[ -n "$resolved_pts" && "$resolved_pts" != "$bin_dir/pts" ]]; then
+    err "PATH entry mismatch: command -v pts -> $resolved_pts (expected $bin_dir/pts)"
+    err "copy-paste fix: rm -f \"$resolved_pts\" && hash -r && \"$bin_dir/pts\" --help"
+    fail=1
+  fi
 
   if [[ "$fail" -ne 0 ]]; then
     err "post-install self-check failed."
     cat >&2 <<EOF
 [HINT] Copy-paste fix:
   cd "$SCRIPT_DIR"
-  rm -f "$bin_dir/bdtool" "$bin_dir/ptbd-start"
+  rm -f "$bin_dir/bdtool" "$bin_dir/ptbd-start" "$bin_dir/pt" "$bin_dir/pts"
   bash install.sh --offline
   "$bin_dir/bdtool" --help
 EOF
     {
       echo "[DIAG] command -v bdtool: $(command -v bdtool 2>/dev/null || echo missing)"
       echo "[DIAG] command -v ptbd-start: $(command -v ptbd-start 2>/dev/null || echo missing)"
+      echo "[DIAG] command -v pt: $(command -v pt 2>/dev/null || echo missing)"
+      echo "[DIAG] command -v pts: $(command -v pts 2>/dev/null || echo missing)"
       [[ -e "$bin_dir/bdtool" ]] && ls -l "$bin_dir/bdtool" || echo "[DIAG] missing: $bin_dir/bdtool"
       [[ -e "$bin_dir/ptbd-start" ]] && ls -l "$bin_dir/ptbd-start" || echo "[DIAG] missing: $bin_dir/ptbd-start"
+      [[ -e "$bin_dir/pt" ]] && ls -l "$bin_dir/pt" || echo "[DIAG] missing: $bin_dir/pt"
+      [[ -e "$bin_dir/pts" ]] && ls -l "$bin_dir/pts" || echo "[DIAG] missing: $bin_dir/pts"
     } >&2
     exit 1
   fi

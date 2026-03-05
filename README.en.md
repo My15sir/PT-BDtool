@@ -17,6 +17,8 @@ fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
+pt --help
+pts --help
 ```
 Expected success: help output is shown (`Usage` or `用法` line).
 
@@ -43,12 +45,16 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 command -v bdtool
 command -v ptbd-start
+command -v pt
+command -v pts
 bdtool --help >/dev/null
 bdtool doctor
 ptbd-start --help >/dev/null
-echo "PT-BDtool self-check PASS"
+pt --help >/dev/null
+pts --help >/dev/null
+echo "PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)"
 ```
-Expected success: prints `PT-BDtool self-check PASS`.
+Expected success: prints `PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)`.
 
 ## Common Error Fix
 
