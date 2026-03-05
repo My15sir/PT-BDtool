@@ -584,9 +584,6 @@ generate_item() {
       local bd_source="$src"
       local bd_stdout_tmp=""
       local bd_report=""
-      if [[ "$type" == "BDMV" ]]; then
-        bd_source="$src/BDMV"
-      fi
       bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
       rm -f "$out/BDInfo_1.txt" "$bd_stdout_tmp"
       if ! BDInfo -w "$bd_source" "$out" > "$bd_stdout_tmp" 2>/dev/null; then
@@ -632,7 +629,7 @@ generate_item() {
     return 0
   else
     screen_error "步骤失败：生成阶段校验未通过（$type）"
-    screen "$(msg gen_done)$out"
+    screen "输出目录：$out"
     screen_error "$(msg op_fail)"
     LAST_OUTPUT_DIR="$out"
     return 1
@@ -642,30 +639,50 @@ generate_item() {
 download_item() {
   local out="$1"
   local parent="${2:-}"
-  local base src_parent zip_path tar_path
+  local base src_parent zip_path tar_path final_pkg=""
+  local client_upload_path=""
+  local package_dir=""
+  local client_mode=0
   src_parent="$(dirname "$out")"
-  if [[ -z "$parent" ]]; then
-    parent="$(resolve_default_download_dir)" || return 1
+  if is_client_upload_mode; then
+    client_mode=1
+    package_dir="${BDTOOL_CLIENT_STAGE_DIR:-$src_parent}"
+  else
+    if [[ -z "$parent" ]]; then
+      parent="$(resolve_default_download_dir)" || return 1
+    fi
+    package_dir="$parent"
   fi
-  mkdir -p "$parent"
+  mkdir -p "$package_dir"
   base="$(basename "$out")"
-  zip_path="$parent/$base.zip"
-  tar_path="$parent/$base.tar.gz"
+  zip_path="$package_dir/$base.zip"
+  tar_path="$package_dir/$base.tar.gz"
 
   if command -v zip >/dev/null 2>&1; then
     screen "打包进度: 0%"
     screen "打包进度: 30%"
     (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
     screen "打包进度: 100%"
-    screen "$(msg downloaded)$zip_path"
+    final_pkg="$zip_path"
+  else
+    screen "打包进度: 0%"
+    screen "打包进度: 30%"
+    tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
+    screen "打包进度: 100%"
+    final_pkg="$tar_path"
+  fi
+
+  if [[ "$client_mode" -eq 1 ]]; then
+    client_upload_path="$(upload_artifact_to_client "$final_pkg" || true)"
+    if [[ -z "$client_upload_path" ]]; then
+      return 1
+    fi
+    screen "$(msg downloaded)$client_upload_path"
+    rm -f "$final_pkg"
     return 0
   fi
 
-  screen "打包进度: 0%"
-  screen "打包进度: 30%"
-  tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
-  screen "打包进度: 100%"
-  screen "$(msg downloaded)$tar_path"
+  screen "$(msg downloaded)$final_pkg"
   return 0
 }
 
@@ -700,11 +717,20 @@ post_process_item() {
   local c=""
   local download_dir=""
   local default_action="${BDTOOL_POST_ACTION:-}"
-  download_dir="$(resolve_default_download_dir)" || {
-    screen_error "步骤失败：无法解析默认下载目录"
-    screen_error "$(msg op_fail)"
-    return 1
-  }
+  if is_client_upload_mode; then
+    download_dir=""
+  else
+    if [[ -n "${SSH_CONNECTION:-}" && -z "${BDTOOL_DOWNLOAD_DIR:-}" ]]; then
+      screen_error "步骤失败：远程会话未配置客户端下载通道（请设置 BDTOOL_CLIENT_UPLOAD_URL）"
+      screen_error "$(msg op_fail)"
+      return 1
+    fi
+    download_dir="$(resolve_default_download_dir)" || {
+      screen_error "步骤失败：无法解析默认下载目录"
+      screen_error "$(msg op_fail)"
+      return 1
+    }
+  fi
 
   if download_item "$out" "$download_dir"; then
     screen "$(msg op_ok)"
@@ -913,6 +939,11 @@ main() {
 require_runtime_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 && return 0
+  if [[ -n "${BDTOOL_BUNDLE_DIR:-}" && -x "$BDTOOL_BUNDLE_DIR/bin/$cmd" ]]; then
+    PATH="$BDTOOL_BUNDLE_DIR/bin:$PATH"
+    export PATH
+    command -v "$cmd" >/dev/null 2>&1 && return 0
+  fi
   if [[ "$cmd" == "ffmpeg" ]]; then
     screen_error "缺少依赖命令：ffmpeg"
     screen_error "可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo"

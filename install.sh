@@ -184,7 +184,6 @@ install_runtime_wrappers() {
 #!/usr/bin/env bash
 set -euo pipefail
 BUNDLE_ROOT="$bundle_root"
-export LD_LIBRARY_PATH="\$BUNDLE_ROOT/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 exec "\$BUNDLE_ROOT/bin/BDInfo" "\$@"
 EOF
   chmod +x "$bdinfo_wrapper"

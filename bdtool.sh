@@ -97,6 +97,11 @@ bt_debug() {
 bt_need_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 && return 0
+  if [[ -n "${BDTOOL_BUNDLE_DIR:-}" && -x "$BDTOOL_BUNDLE_DIR/bin/$cmd" ]]; then
+    PATH="$BDTOOL_BUNDLE_DIR/bin:$PATH"
+    export PATH
+    command -v "$cmd" >/dev/null 2>&1 && return 0
+  fi
   if [[ "$cmd" == "ffmpeg" ]]; then
     bt_die "缺少依赖命令：ffmpeg。可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo；然后执行 bash install.sh --offline"
   fi
@@ -207,11 +212,11 @@ bt_resolve_bd_path() {
 
   if [[ -d "$p" ]]; then
     if [[ -d "$p/BDMV" ]]; then
-      echo "$p/BDMV"
+      echo "$p"
       return 0
     fi
     if [[ "$(basename "$p")" == "BDMV" && -d "$p/STREAM" && -d "$p/PLAYLIST" ]]; then
-      echo "$p"
+      echo "$(dirname "$p")"
       return 0
     fi
   fi
@@ -438,7 +443,9 @@ bt_ensure_disc_six_png() {
 bt_pick_disc_probe_video() {
   local bd_path="$1"
   local candidate=""
-  if [[ -d "$bd_path" && -d "$bd_path/STREAM" ]]; then
+  if [[ -d "$bd_path" && -d "$bd_path/BDMV/STREAM" ]]; then
+    candidate="$(find "$bd_path/BDMV/STREAM" -type f -iname '*.m2ts' -printf '%s %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+  elif [[ -d "$bd_path" && -d "$bd_path/STREAM" ]]; then
     candidate="$(find "$bd_path/STREAM" -type f -iname '*.m2ts' -printf '%s %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
   elif [[ -f "$bd_path" ]]; then
     candidate="$bd_path"

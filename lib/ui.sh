@@ -194,15 +194,60 @@ bundle_runtime_healthy() {
   local bundle_lib="$2"
   local ffprobe_bin="$bundle_bin/ffprobe"
   local mediainfo_bin="$bundle_bin/mediainfo"
-  local ld_path=""
+  : "${bundle_lib:=}"
   [[ -x "$ffprobe_bin" && -x "$mediainfo_bin" ]] || return 1
-  ld_path="$bundle_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-  if ! LD_LIBRARY_PATH="$ld_path" "$ffprobe_bin" -version >/dev/null 2>&1; then
+  if ! "$ffprobe_bin" -version >/dev/null 2>&1; then
     return 1
   fi
-  if ! LD_LIBRARY_PATH="$ld_path" "$mediainfo_bin" --Version >/dev/null 2>&1; then
+  if ! "$mediainfo_bin" --Version >/dev/null 2>&1; then
     return 1
   fi
+  return 0
+}
+
+is_client_upload_mode() {
+  [[ -n "${BDTOOL_CLIENT_UPLOAD_URL:-}" ]]
+}
+
+build_client_upload_url() {
+  local upload_url="${BDTOOL_CLIENT_UPLOAD_URL:-}"
+  local filename="${1:-}"
+  local encoded_name=""
+  [[ -n "$upload_url" && -n "$filename" ]] || return 1
+  if [[ "$upload_url" == *"{filename}"* ]]; then
+    printf "%s" "${upload_url//\{filename\}/$filename}"
+    return 0
+  fi
+  encoded_name="$(printf "%s" "$filename" | sed -e 's/%/%25/g' -e 's/ /%20/g')"
+  if [[ "$upload_url" == *\?* ]]; then
+    printf "%s&filename=%s" "$upload_url" "$encoded_name"
+  else
+    printf "%s?filename=%s" "$upload_url" "$encoded_name"
+  fi
+}
+
+upload_artifact_to_client() {
+  local artifact_file="${1:-}"
+  local upload_url=""
+  local upload_resp=""
+  local curl_bin=""
+  [[ -f "$artifact_file" ]] || return 1
+  is_client_upload_mode || return 1
+  curl_bin="$(command -v curl || true)"
+  [[ -n "$curl_bin" ]] || {
+    log_err "客户端上传失败：缺少 curl"
+    return 1
+  }
+  upload_url="$(build_client_upload_url "$(basename "$artifact_file")")" || return 1
+  upload_resp="$(
+    "$curl_bin" --fail --silent --show-error --connect-timeout 10 --max-time 600 \
+      -X PUT --data-binary @"$artifact_file" "$upload_url" 2>/dev/null || true
+  )"
+  if [[ -z "$upload_resp" ]]; then
+    log_err "客户端上传失败：$upload_url"
+    return 1
+  fi
+  printf "%s" "$upload_resp"
   return 0
 }
 
