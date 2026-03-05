@@ -207,7 +207,7 @@ read_line() {
 
   if [[ -t 0 ]]; then
     read -r -p "$prompt" line || return 1
-  elif [[ -p /dev/stdin ]]; then
+  elif [[ ! -t 0 ]]; then
     IFS= read -r line || return 1
   elif [[ -t 1 && -r /dev/tty ]]; then
     read -r -p "$prompt" line < /dev/tty || return 1
@@ -392,8 +392,8 @@ collect_results() {
 
   if [[ "$full" == "1" ]]; then
     root="$(normalize_scan_root "${BDTOOL_SCAN_FULL_ROOT:-/}")"
-    screen "[INFO] 扫描中：全盘扫描（$root）"
-    screen "[INFO] 扫描进度: 0%"
+    screen "扫描中：全盘扫描（$root）"
+    screen "扫描进度: 0%"
     tmp_candidates="$(mktemp)"
     find "$root" \
       \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
@@ -408,7 +408,7 @@ collect_results() {
         pct=$((processed * 100 / total))
         if [[ "$pct" -ge 100 ]]; then pct=100; fi
         if (( pct >= last_pct + 10 || pct == 100 )); then
-          screen "[INFO] 扫描进度: ${pct}%"
+          screen "扫描进度: ${pct}%"
           last_pct="$pct"
         fi
       fi
@@ -436,8 +436,8 @@ collect_results() {
     rm -f "$tmp_candidates"
   else
     root="$(normalize_scan_root "$target")"
-    screen "[INFO] 扫描中：目录扫描（$root）"
-    screen "[INFO] 扫描进度: 0%"
+    screen "扫描中：目录扫描（$root）"
+    screen "扫描进度: 0%"
     tmp_candidates="$(mktemp)"
     find "$root" \
       \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
@@ -452,7 +452,7 @@ collect_results() {
         pct=$((processed * 100 / total))
         if [[ "$pct" -ge 100 ]]; then pct=100; fi
         if (( pct >= last_pct + 10 || pct == 100 )); then
-          screen "[INFO] 扫描进度: ${pct}%"
+          screen "扫描进度: ${pct}%"
           last_pct="$pct"
         fi
       fi
@@ -479,8 +479,10 @@ collect_results() {
     done < "$tmp_candidates"
     rm -f "$tmp_candidates"
   fi
-  screen "[INFO] 扫描进度: 100%"
-  screen "[INFO] 扫描完成：共发现 ${#SCAN_ITEMS[@]} 个候选"
+  if (( last_pct < 100 )); then
+    screen "扫描进度: 100%"
+  fi
+  screen "扫描完成：共发现 ${#SCAN_ITEMS[@]} 个候选"
 }
 
 show_results() {
@@ -527,7 +529,7 @@ generate_item() {
   }
   dbg "output root=$BDTOOL_SOURCE_INFO_ROOT dir=$out type=$type src=$src"
   mkdir -p "$out"
-  screen "[INFO] 生成中：$src"
+  screen "生成中：$src"
 
   if [[ "$type" == "VIDEO" ]]; then
     if require_runtime_cmd mediainfo; then
@@ -598,7 +600,7 @@ generate_item() {
   fi
 
   if [[ "$has_error" -eq 0 ]]; then
-    screen "[INFO] 生成完成"
+    screen "生成完成"
     screen "$(msg gen_done)$out"
     screen "$(msg op_ok)"
   else
@@ -622,18 +624,18 @@ download_item() {
   tar_path="$parent/$base.tar.gz"
 
   if command -v zip >/dev/null 2>&1; then
-    screen "[INFO] 打包进度: 0%"
-    screen "[INFO] 打包进度: 30%"
+    screen "打包进度: 0%"
+    screen "打包进度: 30%"
     (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
-    screen "[INFO] 打包进度: 100%"
+    screen "打包进度: 100%"
     screen "$(msg downloaded)$zip_path"
     return 0
   fi
 
-  screen "[INFO] 打包进度: 0%"
-  screen "[INFO] 打包进度: 30%"
+  screen "打包进度: 0%"
+  screen "打包进度: 30%"
   tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
-  screen "[INFO] 打包进度: 100%"
+  screen "打包进度: 100%"
   screen "$(msg downloaded)$tar_path"
   return 0
 }
@@ -666,49 +668,42 @@ cleanup_item() {
 
 post_process_item() {
   local out="$1"
-  local c retries
+  local c=""
+  local download_dir=""
+  local default_action="${BDTOOL_POST_ACTION:-}"
+  download_dir="$(resolve_default_download_dir || true)"
+  [[ -n "$download_dir" ]] || download_dir="$HOME/Desktop/PT-BDtool"
 
-  retries=0
-  while (( retries < 3 )); do
-    section "$(msg post_title)"
-    menu_option "$(msg post_1)"
-    menu_option "$(msg post_2)"
-    menu_option "$(msg post_0)"
-    menu_option "$(msg post_9)"
+  if download_item "$out" "$download_dir"; then
+    screen "$(msg op_ok)"
+    cleanup_item "$out" >/dev/null 2>&1 || true
+    screen "$(msg cleaned)$out"
+  else
+    screen_error "$(msg op_fail)"
+    return 1
+  fi
+
+  section "$(msg post_title)"
+  menu_option "$(msg post_0)"
+  menu_option "$(msg post_9)"
+  if [[ -n "$default_action" ]]; then
+    c="$default_action"
+  else
     read_line "$(msg prompt): " c || return 0
-    case "$c" in
-      1)
-        local download_dir=""
-        ask_download_dir download_dir
-        if download_item "$out" "$download_dir"; then
-          screen "$(msg op_ok)"
-          screen "$(msg post_hint_next)"
-        else
-          screen_error "$(msg op_fail)"
-        fi
-        ;;
-      2)
-        if cleanup_item "$out"; then
-          screen "$(msg op_ok)"
-        else
-          screen_error "$(msg op_fail)"
-        fi
-        ;;
-      0|"")
-        return 0
-        ;;
-      9|q|Q)
-        BDTOOL_EXIT_REQUESTED=1
-        return 0
-        ;;
-      *)
-        retries=$((retries + 1))
-        screen_error "$(msg invalid)"
-        ;;
-    esac
-  done
-
-  screen "$(msg pick_limit)"
+  fi
+  case "$c" in
+    9|q|Q)
+      BDTOOL_EXIT_REQUESTED=1
+      screen "$(msg bye)"
+      return 0
+      ;;
+    0|"")
+      return 0
+      ;;
+    *)
+      return 0
+      ;;
+  esac
   return 0
 }
 
@@ -776,52 +771,8 @@ scan_flow() {
 }
 
 scan_menu() {
-  local c p retry
-  while true; do
-    section "$(msg scan_title)"
-    menu_option "$(msg scan_1)"
-    menu_option "$(msg scan_2)"
-    menu_option "$(msg scan_0)"
-    read_line "$(msg prompt): " c || return 0
-    case "$c" in
-      1)
-        screen "$(msg scan_warn_1)"
-        screen "$(msg scan_warn_2)"
-        read_line "$(msg scan_confirm): " c || return 0
-        c="$(echo "$c" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        dbg "full-scan confirm input='$c'"
-        case "${c,,}" in
-          1|y|yes)
-            dbg "full-scan confirmed -> entering scan_flow"
-            scan_flow "/" "1"
-            [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
-            ;;
-          2|n|no|q|quit|exit|"\\"|"")
-            dbg "full-scan canceled -> back to scan menu"
-            ;;
-          *)
-            screen_error "$(msg invalid)"
-            ;;
-        esac
-        ;;
-      2)
-        p="${BDTOOL_SCAN_DIR:-$PWD}"
-        if [[ -d "$p" && -r "$p" ]]; then
-          screen "[INFO] 扫描指定目录已自动使用：$p"
-          scan_flow "$p" "0"
-          [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
-        else
-          screen_error "$(msg dir_invalid)（自动目录不可读：$p）"
-        fi
-        ;;
-      /)
-        scan_flow "/" "1"
-        [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
-        ;;
-      0) return 0 ;;
-      *) screen_error "$(msg invalid)" ;;
-    esac
-  done
+  scan_flow "/" "1"
+  return 0
 }
 
 main_menu() {
@@ -833,7 +784,7 @@ main_menu() {
     menu_option "$(msg main_3)"
     read_line "$(msg prompt): " c || return 0
     case "$c" in
-      1) scan_menu ;;
+      1|/) scan_menu; [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0 ;;
       2)
         if [[ "$LANG_CODE" == "zh" ]]; then LANG_CODE="en"; else LANG_CODE="zh"; fi
         ;;
@@ -924,8 +875,13 @@ require_runtime_cmd() {
     screen_error "可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo"
     return 1
   fi
+  if [[ "$cmd" == "BDInfo" ]]; then
+    screen_error "缺少依赖命令：BDInfo"
+    screen_error "请先执行：bash install.sh --offline"
+    return 1
+  fi
   screen_error "缺少依赖命令：$cmd"
-  screen_error "请先执行：bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh，然后重新安装离线包。"
+  screen_error "请先执行：bash install.sh --offline"
   return 1
 }
 

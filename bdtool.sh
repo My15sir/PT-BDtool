@@ -100,7 +100,10 @@ bt_need_cmd() {
   if [[ "$cmd" == "ffmpeg" ]]; then
     bt_die "缺少依赖命令：ffmpeg。可复制修复：apt-get update && apt-get install -y ffmpeg mediainfo；然后执行 bash install.sh --offline"
   fi
-  bt_die "缺少依赖命令：$cmd。请先执行 scripts/fetch-deps.sh + scripts/build-bundle.sh，并重新安装离线包。"
+  if [[ "$cmd" == "BDInfo" ]]; then
+    bt_die "缺少依赖命令：BDInfo。请执行 bash install.sh --offline 完成离线依赖安装。"
+  fi
+  bt_die "缺少依赖命令：$cmd。请执行 bash install.sh --offline 后重试。"
 }
 
 bt_safe_name() {

@@ -174,6 +174,23 @@ install_entrypoints() {
   ln -sfn "$install_root/ptbd-start.sh" "$pts_link"
 }
 
+install_runtime_wrappers() {
+  local install_root="$1"
+  local bin_dir="$2"
+  local bundle_root="$install_root/third_party/bundle/linux-amd64"
+  local bdinfo_wrapper="$bin_dir/BDInfo"
+  mkdir -p "$bin_dir"
+  cat > "$bdinfo_wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+BUNDLE_ROOT="$bundle_root"
+export LD_LIBRARY_PATH="\$BUNDLE_ROOT/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+exec "\$BUNDLE_ROOT/bin/BDInfo" "\$@"
+EOF
+  chmod +x "$bdinfo_wrapper"
+  log "installed runtime wrapper: $bdinfo_wrapper"
+}
+
 post_install_self_check() {
   local install_root="$1"
   local bin_dir="$2"
@@ -229,6 +246,12 @@ post_install_self_check() {
     err "self-check missing entrypoint: $bin_dir/pts"
     fail=1
   fi
+  if [[ -x "$bin_dir/BDInfo" ]]; then
+    log "self-check ok: runtime wrapper $bin_dir/BDInfo"
+  else
+    err "self-check missing runtime wrapper: $bin_dir/BDInfo"
+    fail=1
+  fi
 
   if ! "$install_root/bdtool" --help >/dev/null 2>&1; then
     err "self-check failed: $install_root/bdtool --help"
@@ -252,6 +275,10 @@ post_install_self_check() {
   fi
   if ! "$bin_dir/pts" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/pts --help"
+    fail=1
+  fi
+  if ! command -v BDInfo >/dev/null 2>&1; then
+    err "self-check failed: command -v BDInfo"
     fail=1
   fi
 
@@ -399,6 +426,7 @@ else
   BIN_DIR="${PTBD_BIN_DIR:-$HOME/.local/bin}"
 fi
 install_entrypoints "$INSTALL_ROOT" "$BIN_DIR"
+install_runtime_wrappers "$INSTALL_ROOT" "$BIN_DIR"
 # Refresh command lookup cache so post-check sees the new symlink entrypoints.
 hash -r 2>/dev/null || true
 if [[ "$BIN_DIR" == "$HOME/.local/bin" ]]; then

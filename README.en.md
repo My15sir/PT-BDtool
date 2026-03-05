@@ -28,9 +28,11 @@ pt
 
 Note: `pt` auto-detects audio/video/disc input types.
 Interaction notes:
-- Input `/` in scan menu to trigger default full scan (auto-excludes `/proc /sys /dev /run`).
+- Selecting `Scan` in main menu directly starts default full scan (auto-excludes `/proc /sys /dev /run`).
+- Input `/` is still supported as a scan shortcut.
 - Scan and package-download stages show percent progress up to `100%`.
 - Leave download path empty to use the real user desktop (`~/Desktop/PT-BDtool`).
+- After item generation, download runs automatically, then cleanup runs automatically.
 
 ## Copy This To Uninstall
 ```bash
