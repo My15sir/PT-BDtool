@@ -337,7 +337,9 @@ pick_disc_probe_video() {
 make_disc_screenshots() {
   local src="$1"
   local out="$2"
-  local probe duration dur_int i sec
+  local progress_base="${3:-0}"
+  local progress_step="${4:-0}"
+  local probe duration dur_int i sec progress_pct
   probe="$(pick_disc_probe_video "$src")"
   if [[ -n "$probe" ]] && require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
     duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$probe" 2>/dev/null || true)"
@@ -347,6 +349,11 @@ make_disc_screenshots() {
     for i in 1 2 3 4 5 6; do
       sec=$(( (dur_int * i) / 7 ))
       ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1 || true
+      if [[ "$progress_step" =~ ^[0-9]+$ ]] && (( progress_step > 0 )); then
+        progress_pct=$((progress_base + i * progress_step))
+        (( progress_pct > 99 )) && progress_pct=99
+        screen "生成进度: ${progress_pct}% (截图生成 ${i}/6)"
+      fi
     done
   fi
   ensure_six_png "$out"
@@ -512,11 +519,38 @@ show_results() {
   return 0
 }
 
+preflight_post_process() {
+  local resolved_default_dir=""
+  if is_client_upload_mode; then
+    if ! command -v curl >/dev/null 2>&1; then
+      screen_error "步骤失败：已启用客户端下载通道但系统缺少 curl"
+      return 1
+    fi
+    if ! build_client_upload_url "ptbd-preflight.bin" >/dev/null 2>&1; then
+      screen_error "步骤失败：BDTOOL_CLIENT_UPLOAD_URL 无法解析"
+      return 1
+    fi
+    dbg "preflight mode=client-upload"
+    return 0
+  fi
+
+  if [[ -n "${SSH_CONNECTION:-}" && -z "${BDTOOL_DOWNLOAD_DIR:-}" ]]; then
+    screen_error "步骤失败：远程会话未配置客户端下载通道（请设置 BDTOOL_CLIENT_UPLOAD_URL）"
+    return 1
+  fi
+
+  resolved_default_dir="$(resolve_default_download_dir)" || {
+    screen_error "步骤失败：无法解析默认下载目录"
+    return 1
+  }
+  dbg "preflight mode=local-download dir=$resolved_default_dir"
+  return 0
+}
+
 generate_item() {
   local type="$1"
   local src="$2"
-  local safe out
-  local has_error=0
+  local out
   local hard_fail=0
 
   resolve_source_output_layout "$type" "$src" || {
@@ -531,8 +565,10 @@ generate_item() {
   dbg "output root=$BDTOOL_SOURCE_INFO_ROOT dir=$out type=$type src=$src"
   mkdir -p "$out"
   screen "生成中：$src"
+  screen "生成进度: 0% (任务初始化)"
 
   if [[ "$type" == "VIDEO" ]]; then
+    screen "生成进度: 10% (mediainfo 生成中)"
     if require_runtime_cmd mediainfo; then
       if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
         echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
@@ -542,6 +578,7 @@ generate_item() {
       echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
       hard_fail=1
     fi
+    screen "生成进度: 30% (mediainfo 生成完成)"
 
     if require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
       local duration dur_int i sec
@@ -549,18 +586,22 @@ generate_item() {
       dur_int="${duration%.*}"
       [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
       (( dur_int < 12 )) && dur_int=12
+      screen "生成进度: 35% (截图生成准备)"
       for i in 1 2 3 4 5 6; do
         sec=$(( (dur_int * i) / 7 ))
         if ! ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1; then
-          has_error=1
+          hard_fail=1
         fi
+        screen "生成进度: $((35 + i * 10))% (截图生成 ${i}/6)"
       done
     else
       hard_fail=1
     fi
     ensure_six_png "$out"
+    screen "生成进度: 96% (生成结果校验中)"
     finalize_video_output "$out" || hard_fail=1
   elif [[ "$type" == "AUDIO" ]]; then
+    screen "生成进度: 10% (mediainfo 生成中)"
     if require_runtime_cmd mediainfo; then
       if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
         echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
@@ -570,7 +611,9 @@ generate_item() {
       echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
       hard_fail=1
     fi
+    screen "生成进度: 45% (mediainfo 生成完成)"
 
+    screen "生成进度: 50% (频谱图生成中)"
     if require_runtime_cmd ffmpeg; then
       if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$out/频谱图_1.png" >/dev/null 2>&1; then
         hard_fail=1
@@ -578,32 +621,41 @@ generate_item() {
     else
       hard_fail=1
     fi
+    screen "生成进度: 96% (生成结果校验中)"
     finalize_audio_output "$out" || hard_fail=1
   else
+    screen "生成进度: 10% (BDInfo 生成中)"
     if require_runtime_cmd BDInfo; then
       local bd_source="$src"
       local bd_stdout_tmp=""
       local bd_report=""
+      local bd_attempt=0
       bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
       rm -f "$out/BDInfo_1.txt" "$bd_stdout_tmp"
-      if ! BDInfo -w "$bd_source" "$out" > "$bd_stdout_tmp" 2>/dev/null; then
+      if ! bdinfo_write_report "$bd_source" "$out" "$bd_stdout_tmp"; then
         screen_error "BDInfo 执行失败：$bd_source"
         hard_fail=1
       else
-        if bdinfo_report_valid "$bd_stdout_tmp"; then
-          bd_report="$bd_stdout_tmp"
-        else
+        while (( bd_attempt < 10 )); do
+          if bdinfo_raw_report_valid "$bd_stdout_tmp"; then
+            bd_report="$bd_stdout_tmp"
+            break
+          fi
           bd_report="$(find_valid_bdinfo_report "$out" || true)"
-        fi
+          [[ -n "$bd_report" ]] && break
+          bd_attempt=$((bd_attempt + 1))
+          sleep 1
+        done
         if [[ -z "$bd_report" ]]; then
-          screen_error "BDInfo 输出无效：缺少 playlist/clip/video/audio/stream 核心字段"
+          screen_error "BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）"
           hard_fail=1
         else
-          if [[ "$bd_report" != "$out/BDInfo_1.txt" ]]; then
-            cp -f "$bd_report" "$out/BDInfo_1.txt" || hard_fail=1
+          if ! write_full_bdinfo_report "$bd_report" "$bd_source" "$out/BDInfo_1.txt"; then
+            screen_error "BDInfo 报告归档失败：$out/BDInfo_1.txt"
+            hard_fail=1
           fi
           if ! bdinfo_report_valid "$out/BDInfo_1.txt"; then
-            screen_error "BDInfo 输出无效：$out/BDInfo_1.txt"
+            screen_error "BDInfo 输出无效：$out/BDInfo_1.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
             hard_fail=1
           fi
           find "$out" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
@@ -611,7 +663,10 @@ generate_item() {
       fi
       rm -f "$bd_stdout_tmp"
       if [[ "$hard_fail" -eq 0 ]]; then
-        make_disc_screenshots "$src" "$out"
+        screen "生成进度: 55% (BDInfo 生成完成)"
+        screen "生成进度: 60% (截图生成准备)"
+        make_disc_screenshots "$src" "$out" 60 6
+        screen "生成进度: 96% (生成结果校验中)"
         finalize_disc_output "$out" || hard_fail=1
       fi
     else
@@ -619,17 +674,14 @@ generate_item() {
     fi
   fi
 
-  has_error="$hard_fail"
-
-  if [[ "$has_error" -eq 0 ]]; then
-    screen "生成完成"
-    screen "$(msg gen_done)$out"
-    screen "$(msg op_ok)"
+  if [[ "$hard_fail" -eq 0 ]]; then
+    screen "生成进度: 100% (生成阶段完成)"
+    screen "生成阶段输出：$out"
     LAST_OUTPUT_DIR="$out"
     return 0
   else
     screen_error "步骤失败：生成阶段校验未通过（$type）"
-    screen "输出目录：$out"
+    screen "生成阶段输出：$out"
     screen_error "$(msg op_fail)"
     LAST_OUTPUT_DIR="$out"
     return 1
@@ -657,31 +709,33 @@ download_item() {
   base="$(basename "$out")"
   zip_path="$package_dir/$base.zip"
   tar_path="$package_dir/$base.tar.gz"
+  screen "打包/上传进度: 0% (准备打包)"
 
   if command -v zip >/dev/null 2>&1; then
-    screen "打包进度: 0%"
-    screen "打包进度: 30%"
+    screen "打包/上传进度: 20% (打包中)"
     (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
-    screen "打包进度: 100%"
+    screen "打包/上传进度: 65% (打包完成)"
     final_pkg="$zip_path"
   else
-    screen "打包进度: 0%"
-    screen "打包进度: 30%"
+    screen "打包/上传进度: 20% (打包中)"
     tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
-    screen "打包进度: 100%"
+    screen "打包/上传进度: 65% (打包完成)"
     final_pkg="$tar_path"
   fi
 
   if [[ "$client_mode" -eq 1 ]]; then
+    screen "打包/上传进度: 70% (上传中)"
     client_upload_path="$(upload_artifact_to_client "$final_pkg" || true)"
     if [[ -z "$client_upload_path" ]]; then
       return 1
     fi
+    screen "打包/上传进度: 100% (上传完成)"
     screen "$(msg downloaded)$client_upload_path"
     rm -f "$final_pkg"
     return 0
   fi
 
+  screen "打包/上传进度: 100% (打包完成)"
   screen "$(msg downloaded)$final_pkg"
   return 0
 }
@@ -800,11 +854,15 @@ handle_multi_select() {
   fi
 
   for idx in "${selected[@]}"; do
+    if ! preflight_post_process; then
+      screen_error "$(msg op_fail)"
+      return 3
+    fi
     if ! generate_item "${SCAN_TYPES[idx-1]}" "${SCAN_ITEMS[idx-1]}"; then
-      return 2
+      return 3
     fi
     if ! post_process_item "$LAST_OUTPUT_DIR"; then
-      return 2
+      return 3
     fi
     if [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]]; then
       return 0
@@ -825,10 +883,16 @@ scan_flow() {
   retries=0
   while (( retries < 3 )); do
     read_line "$(msg pick): " pick || return 0
-    handle_multi_select "$pick"
-    rc=$?
+    if handle_multi_select "$pick"; then
+      rc=0
+    else
+      rc=$?
+    fi
     [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
     if [[ "$rc" -eq 0 || "$rc" -eq 1 ]]; then
+      return 0
+    fi
+    if [[ "$rc" -eq 3 ]]; then
       return 0
     fi
     retries=$((retries + 1))

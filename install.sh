@@ -16,6 +16,7 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 LANG_OVERRIDE=""
 NON_INTERACTIVE=0
+NO_LAUNCH="${PTBD_INSTALL_NO_LAUNCH:-0}"
 COPIED_COUNT=0
 SKIPPED_COUNT=0
 
@@ -333,13 +334,14 @@ EOF
 
 usage() {
   cat <<'USAGE'
-Usage: bash install.sh [--offline] [--lang zh|en] [--non-interactive]
+Usage: bash install.sh [--offline] [--lang zh|en] [--non-interactive] [--no-launch]
 
 Options:
   --offline          Offline install only (default)
   --online-legacy    Kept for compatibility; not supported anymore
   --lang <code>      Pass language to bdtool after install
   --non-interactive  Run installed bdtool in non-interactive mode
+  --no-launch        Skip auto-launching menu after install
 USAGE
 }
 
@@ -362,6 +364,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --non-interactive)
       NON_INTERACTIVE=1
+      shift
+      ;;
+    --no-launch)
+      NO_LAUNCH=1
       shift
       ;;
     -h|--help)
@@ -444,3 +450,17 @@ if [[ "$NON_INTERACTIVE" == "1" ]]; then
   fi
   exec "$INSTALL_ROOT/bdtool" --non-interactive
 fi
+
+if [[ "$NO_LAUNCH" == "1" ]]; then
+  exit 0
+fi
+
+if [[ -t 0 && -t 1 ]]; then
+  log "interactive terminal detected: launching main menu"
+  if [[ -n "$LANG_OVERRIDE" ]]; then
+    exec "$INSTALL_ROOT/bdtool" --lang "$LANG_OVERRIDE"
+  fi
+  exec "$INSTALL_ROOT/bdtool"
+fi
+
+log "non-interactive terminal detected: skip auto launch"

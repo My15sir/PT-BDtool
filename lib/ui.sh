@@ -177,8 +177,12 @@ setup_bundle_runtime() {
       PATH="$bundle_bin:$PATH"
       export PATH
     else
-      log_warn "bundle runtime check failed, skip bundle/bin PATH injection"
-      log_warn "install system deps: apt-get update && apt-get install -y ffmpeg mediainfo"
+      if system_media_runtime_healthy; then
+        log_info "bundle runtime check failed, use system ffmpeg/ffprobe/mediainfo"
+      else
+        log_warn "bundle runtime check failed, skip bundle/bin PATH injection"
+        log_warn "install system deps: apt-get update && apt-get install -y ffmpeg mediainfo"
+      fi
     fi
   fi
   # Do not export bundle lib path globally. It can poison system tools
@@ -202,6 +206,14 @@ bundle_runtime_healthy() {
   if ! "$mediainfo_bin" --Version >/dev/null 2>&1; then
     return 1
   fi
+  return 0
+}
+
+system_media_runtime_healthy() {
+  local cmd=""
+  for cmd in ffmpeg ffprobe mediainfo; do
+    command -v "$cmd" >/dev/null 2>&1 || return 1
+  done
   return 0
 }
 
@@ -231,6 +243,11 @@ upload_artifact_to_client() {
   local upload_url=""
   local upload_resp=""
   local curl_bin=""
+  local resp_file=""
+  local err_file=""
+  local curl_rc=0
+  local elapsed_s=0
+  local curl_err_msg=""
   [[ -f "$artifact_file" ]] || return 1
   is_client_upload_mode || return 1
   curl_bin="$(command -v curl || true)"
@@ -239,10 +256,30 @@ upload_artifact_to_client() {
     return 1
   }
   upload_url="$(build_client_upload_url "$(basename "$artifact_file")")" || return 1
-  upload_resp="$(
-    "$curl_bin" --fail --silent --show-error --connect-timeout 10 --max-time 600 \
-      -X PUT --data-binary @"$artifact_file" "$upload_url" 2>/dev/null || true
-  )"
+  resp_file="$(mktemp)"
+  err_file="$(mktemp)"
+  "$curl_bin" --fail --silent --show-error --connect-timeout 10 --max-time 600 \
+    -X PUT --data-binary @"$artifact_file" "$upload_url" >"$resp_file" 2>"$err_file" &
+  local curl_pid=$!
+  while kill -0 "$curl_pid" 2>/dev/null; do
+    sleep 2
+    elapsed_s=$((elapsed_s + 2))
+    log_info "上传进行中（${elapsed_s}s）"
+  done
+  if ! wait "$curl_pid"; then
+    curl_rc=$?
+  fi
+  upload_resp="$(cat "$resp_file" 2>/dev/null || true)"
+  curl_err_msg="$(head -n1 "$err_file" 2>/dev/null || true)"
+  rm -f "$resp_file" "$err_file"
+  if [[ "$curl_rc" -ne 0 ]]; then
+    if [[ -n "$curl_err_msg" ]]; then
+      log_err "客户端上传失败：$upload_url ($curl_err_msg)"
+    else
+      log_err "客户端上传失败：$upload_url"
+    fi
+    return 1
+  fi
   if [[ -z "$upload_resp" ]]; then
     log_err "客户端上传失败：$upload_url"
     return 1
@@ -350,7 +387,7 @@ resolve_source_output_layout() {
   [[ -n "$src_type" && -n "$src_path" ]] || return 1
 
   case "$src_type" in
-    VIDEO|ISO)
+    VIDEO|AUDIO|ISO)
       base_dir="$(dirname "$src_path")"
       ;;
     BDMV)
@@ -371,14 +408,214 @@ resolve_source_output_layout() {
   [[ -n "$BDTOOL_SOURCE_INFO_ROOT" && -n "$BDTOOL_SOURCE_GEN_NAME" ]]
 }
 
+bdinfo_section_has_content() {
+  local report_file="${1:-}"
+  local section_name="${2:-}"
+  local mode="${3:-text}"
+  [[ -s "$report_file" && -n "$section_name" ]] || return 1
+  awk -v section="$section_name" -v mode="$mode" '
+    function norm(line, out) {
+      out=line
+      gsub(/\r/, "", out)
+      gsub(/^[ \t]+|[ \t]+$/, "", out)
+      return out
+    }
+    function is_header(line, nline) {
+      nline=norm(line)
+      return (nline ~ /^[A-Z][A-Z0-9 _\/-]+:[ \t]*$/ || nline ~ /^BDInfo:[ \t]/ || nline ~ /^扫描(文件|时间):[ \t]/)
+    }
+    BEGIN { in_sec=0; found=0; seen=0; }
+    {
+      line=norm($0)
+      if (line == section) {
+        in_sec=1
+        seen=1
+        next
+      }
+      if (in_sec && is_header($0)) {
+        exit(found ? 0 : 1)
+      }
+      if (!in_sec) {
+        next
+      }
+      if (line == "" || line ~ /^-+$/) {
+        next
+      }
+      if (mode == "files") {
+        if (tolower(line) ~ /\.m2ts($|[ \t])/) {
+          found=1
+        }
+      } else if (mode == "stream") {
+        if (line ~ /[A-Za-z0-9]/) {
+          found=1
+        }
+      } else {
+        found=1
+      }
+    }
+    END {
+      if (!seen || !found) {
+        exit 1
+      }
+    }
+  ' "$report_file"
+}
+
+bdinfo_match_line() {
+  local report_file="${1:-}"
+  local pattern="${2:-}"
+  local cleaned_file=""
+  local rc=1
+  [[ -s "$report_file" && -n "$pattern" ]] || return 1
+  cleaned_file="$(mktemp)" || return 1
+  tr -d '\r' < "$report_file" > "$cleaned_file"
+  if LC_ALL=C grep -Eq "$pattern" "$cleaned_file"; then
+    rc=0
+  fi
+  rm -f "$cleaned_file"
+  return "$rc"
+}
+
+bdinfo_raw_report_valid() {
+  local report_file="${1:-}"
+  local line_count=0
+  [[ -s "$report_file" ]] || return 1
+  line_count="$(wc -l < "$report_file" | tr -d ' ')"
+  [[ "$line_count" =~ ^[0-9]+$ ]] || return 1
+  (( line_count >= 20 )) || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*DISC INFO:[[:space:]]*$' || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*PLAYLIST REPORT:[[:space:]]*$' || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*VIDEO:[[:space:]]*$' || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*AUDIO:[[:space:]]*$' || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*SUBTITLES:[[:space:]]*$' || return 1
+  bdinfo_match_line "$report_file" '^[[:space:]]*FILES:[[:space:]]*$' || return 1
+  bdinfo_section_has_content "$report_file" "DISC INFO:" "text" || return 1
+  bdinfo_section_has_content "$report_file" "PLAYLIST REPORT:" "text" || return 1
+  bdinfo_section_has_content "$report_file" "VIDEO:" "stream" || return 1
+  bdinfo_section_has_content "$report_file" "AUDIO:" "stream" || return 1
+  bdinfo_section_has_content "$report_file" "SUBTITLES:" "text" || return 1
+  bdinfo_section_has_content "$report_file" "FILES:" "files" || return 1
+}
+
+write_full_bdinfo_report() {
+  local raw_report="${1:-}"
+  local scan_target="${2:-}"
+  local out_report="${3:-}"
+  local scan_ts=""
+  [[ -s "$raw_report" && -n "$scan_target" && -n "$out_report" ]] || return 1
+  scan_ts="$(date '+%Y-%m-%d %H:%M:%S %z')"
+  {
+    printf "BDInfo: BDInfoCLI-ng\n"
+    printf "扫描文件: %s\n" "$scan_target"
+    printf "扫描时间: %s\n" "$scan_ts"
+    sed 's/\r$//' "$raw_report"
+  } > "$out_report"
+}
+
+bdinfo_write_report() {
+  local scan_target="${1:-}"
+  local out_dir="${2:-}"
+  local stdout_file="${3:-}"
+  [[ -n "$scan_target" && -n "$out_dir" && -n "$stdout_file" ]] || return 1
+  : > "$stdout_file" || return 1
+
+  # Prefer PTY execution to support BDInfoCLI variants that require interactive
+  # playlist selection and fail when stdout is redirected.
+  if command -v python3 >/dev/null 2>&1; then
+    if python3 - "$scan_target" "$out_dir" "$stdout_file" <<'PY'
+import os
+import pty
+import select
+import sys
+import time
+
+scan_target = sys.argv[1]
+out_dir = sys.argv[2]
+stdout_file = sys.argv[3]
+cmd = ["BDInfo", scan_target, out_dir]
+
+master, slave = pty.openpty()
+pid = os.fork()
+if pid == 0:
+    os.setsid()
+    os.dup2(slave, 0)
+    os.dup2(slave, 1)
+    os.dup2(slave, 2)
+    os.close(master)
+    os.close(slave)
+    os.execvp(cmd[0], cmd)
+
+os.close(slave)
+buf = ""
+sent_choice = False
+start_ts = time.time()
+
+with open(stdout_file, "wb") as fp:
+    while True:
+        readable, _, _ = select.select([master], [], [], 1.0)
+        if master in readable:
+            try:
+                data = os.read(master, 4096)
+            except OSError:
+                data = b""
+            if data:
+                fp.write(data)
+                fp.flush()
+                chunk = data.decode("utf-8", errors="ignore")
+                buf += chunk
+                if len(buf) > 16384:
+                    buf = buf[-16384:]
+                if (not sent_choice) and ("Select (q when finished):" in buf):
+                    os.write(master, b"1\n")
+                    time.sleep(0.15)
+                    os.write(master, b"q\n")
+                    sent_choice = True
+
+        waited_pid, status = os.waitpid(pid, os.WNOHANG)
+        if waited_pid == pid:
+            os.close(master)
+            if os.WIFEXITED(status):
+                sys.exit(os.WEXITSTATUS(status))
+            if os.WIFSIGNALED(status):
+                sys.exit(128 + os.WTERMSIG(status))
+            sys.exit(1)
+
+        if time.time() - start_ts > 1800:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+            os.close(master)
+            sys.exit(124)
+PY
+    then
+      return 0
+    fi
+  fi
+
+  # Fallback to direct call styles.
+  : > "$stdout_file"
+  if BDInfo "$scan_target" "$out_dir" >"$stdout_file" 2>/dev/null; then
+    return 0
+  fi
+  : > "$stdout_file"
+  if BDInfo -w "$scan_target" "$out_dir" >"$stdout_file" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 bdinfo_report_valid() {
   local report_file="${1:-}"
+  local line_count=0
   [[ -s "$report_file" ]] || return 1
-  LC_ALL=C grep -Eiq '(playlist|mpls)' "$report_file" || return 1
-  LC_ALL=C grep -Eiq '(clip|m2ts)' "$report_file" || return 1
-  LC_ALL=C grep -Eiq 'video' "$report_file" || return 1
-  LC_ALL=C grep -Eiq 'audio' "$report_file" || return 1
-  LC_ALL=C grep -Eiq '(stream|codec|bitrate|kbps|avc|hevc|vc-1|dts|truehd|lpcm|aac)' "$report_file" || return 1
+  line_count="$(wc -l < "$report_file" | tr -d ' ')"
+  [[ "$line_count" =~ ^[0-9]+$ ]] || return 1
+  (( line_count >= 30 )) || return 1
+  bdinfo_match_line "$report_file" '^BDInfo:[[:space:]].+' || return 1
+  bdinfo_match_line "$report_file" '^扫描文件:[[:space:]].+' || return 1
+  bdinfo_match_line "$report_file" '^扫描时间:[[:space:]].+' || return 1
+  bdinfo_raw_report_valid "$report_file"
 }
 
 find_valid_bdinfo_report() {
@@ -387,7 +624,7 @@ find_valid_bdinfo_report() {
   [[ -d "$report_dir" ]] || return 1
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    if bdinfo_report_valid "$candidate"; then
+    if bdinfo_raw_report_valid "$candidate"; then
       printf "%s" "$candidate"
       return 0
     fi

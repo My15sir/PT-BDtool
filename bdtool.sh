@@ -291,16 +291,60 @@ bt_write_mediainfo() {
 
 bt_bdinfo_report_valid() {
   local report_file="${1:-}"
+  local cleaned=""
   if declare -F bdinfo_report_valid >/dev/null 2>&1; then
     bdinfo_report_valid "$report_file"
     return $?
   fi
   [[ -s "$report_file" ]] || return 1
-  LC_ALL=C grep -Eiq '(playlist|mpls)' "$report_file" || return 1
-  LC_ALL=C grep -Eiq '(clip|m2ts)' "$report_file" || return 1
-  LC_ALL=C grep -Eiq 'video' "$report_file" || return 1
-  LC_ALL=C grep -Eiq 'audio' "$report_file" || return 1
-  LC_ALL=C grep -Eiq '(stream|codec|bitrate|kbps|avc|hevc|vc-1|dts|truehd|lpcm|aac)' "$report_file" || return 1
+  cleaned="$(mktemp)"
+  tr -d '\r' < "$report_file" > "$cleaned"
+  LC_ALL=C grep -Eq '^BDInfo:[[:space:]].+' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^扫描文件:[[:space:]].+' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^扫描时间:[[:space:]].+' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*DISC INFO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*PLAYLIST REPORT:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*VIDEO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*AUDIO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*SUBTITLES:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*FILES:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  rm -f "$cleaned"
+}
+
+bt_bdinfo_raw_report_valid() {
+  local report_file="${1:-}"
+  local cleaned=""
+  if declare -F bdinfo_raw_report_valid >/dev/null 2>&1; then
+    bdinfo_raw_report_valid "$report_file"
+    return $?
+  fi
+  [[ -s "$report_file" ]] || return 1
+  cleaned="$(mktemp)"
+  tr -d '\r' < "$report_file" > "$cleaned"
+  LC_ALL=C grep -Eq '^[[:space:]]*DISC INFO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*PLAYLIST REPORT:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*VIDEO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*AUDIO:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*SUBTITLES:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  LC_ALL=C grep -Eq '^[[:space:]]*FILES:[[:space:]]*$' "$cleaned" || { rm -f "$cleaned"; return 1; }
+  rm -f "$cleaned"
+}
+
+bt_write_full_bdinfo_report() {
+  local raw_report="${1:-}"
+  local scan_target="${2:-}"
+  local out_report="${3:-}"
+  if declare -F write_full_bdinfo_report >/dev/null 2>&1; then
+    write_full_bdinfo_report "$raw_report" "$scan_target" "$out_report"
+    return $?
+  fi
+  [[ -s "$raw_report" && -n "$scan_target" && -n "$out_report" ]] || return 1
+  {
+    printf "BDInfo: BDInfoCLI-ng\n"
+    printf "扫描文件: %s\n" "$scan_target"
+    printf "扫描时间: %s\n" "$(date '+%Y-%m-%d %H:%M:%S %z')"
+    cat "$raw_report"
+  } > "$out_report"
 }
 
 bt_find_valid_bdinfo_report() {
@@ -313,7 +357,7 @@ bt_find_valid_bdinfo_report() {
   [[ -d "$info_dir" ]] || return 1
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    if bt_bdinfo_report_valid "$candidate"; then
+    if bt_bdinfo_raw_report_valid "$candidate"; then
       printf "%s" "$candidate"
       return 0
     fi
@@ -329,7 +373,11 @@ bt_write_bdinfo_report() {
   local bd_path="$1"
   local info_dir="$2"
   local stdout_file="$3"
-  BDInfo -w "$bd_path" "$info_dir" > "$stdout_file"
+  if declare -F bdinfo_write_report >/dev/null 2>&1; then
+    bdinfo_write_report "$bd_path" "$info_dir" "$stdout_file"
+    return $?
+  fi
+  BDInfo "$bd_path" "$info_dir" > "$stdout_file"
 }
 
 bt_run_bdinfo_report() {
@@ -338,6 +386,7 @@ bt_run_bdinfo_report() {
   local latest_txt=""
   local stdout_txt=""
   local err_msg=""
+  local attempt=0
 
   bt_need_cmd BDInfo
   mkdir -p "$info_dir"
@@ -348,19 +397,24 @@ bt_run_bdinfo_report() {
   if ! execute_with_spinner "生成 BDInfo" bt_write_bdinfo_report "$bd_path" "$info_dir" "$stdout_txt"; then
     err_msg="BDInfo 执行失败：$bd_path"
   else
-    if bt_bdinfo_report_valid "$stdout_txt"; then
-      latest_txt="$stdout_txt"
-    else
+    while [[ "$attempt" -lt 10 ]]; do
+      if bt_bdinfo_raw_report_valid "$stdout_txt"; then
+        latest_txt="$stdout_txt"
+        break
+      fi
       latest_txt="$(bt_find_valid_bdinfo_report "$info_dir" || true)"
-    fi
+      [[ -n "$latest_txt" ]] && break
+      attempt=$((attempt + 1))
+      sleep 1
+    done
     if [[ -z "$latest_txt" ]]; then
-      err_msg="BDInfo 输出无效：缺少 playlist/clip/video/audio/stream 核心字段（$bd_path）"
+      err_msg="BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）（$bd_path）"
     else
-      if [[ "$latest_txt" != "$info_dir/BDInfo_1.txt" ]]; then
-        cp -f "$latest_txt" "$info_dir/BDInfo_1.txt" || err_msg="BDInfo 报告归档失败：$info_dir/BDInfo_1.txt"
+      if ! bt_write_full_bdinfo_report "$latest_txt" "$bd_path" "$info_dir/BDInfo_1.txt"; then
+        err_msg="BDInfo 报告归档失败：$info_dir/BDInfo_1.txt"
       fi
       if [[ -z "$err_msg" ]] && ! bt_bdinfo_report_valid "$info_dir/BDInfo_1.txt"; then
-        err_msg="BDInfo 输出无效：$info_dir/BDInfo_1.txt"
+        err_msg="BDInfo 输出无效：$info_dir/BDInfo_1.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
       fi
     fi
   fi
