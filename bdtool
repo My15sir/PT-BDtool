@@ -46,9 +46,14 @@ find_app_root() {
   return 1
 }
 
-SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-${0:-}}"
+if [[ -z "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_SOURCE="$(command -v bdtool 2>/dev/null || true)"
+fi
+[[ -n "$SCRIPT_SOURCE" ]] || SCRIPT_SOURCE="./bdtool"
 SCRIPT_PATH="$(resolve_script_path "$SCRIPT_SOURCE")"
-SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+[[ -n "$SCRIPT_PATH" ]] || SCRIPT_PATH="$SCRIPT_SOURCE"
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)"
 ROOT_DIR="$(find_app_root "$SCRIPT_DIR" || true)"
 if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
   echo "[ERROR] PT-BDtool runtime not found: lib/ui.sh" >&2
