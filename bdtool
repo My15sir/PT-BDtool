@@ -54,7 +54,10 @@ fi
 SCRIPT_PATH="$(resolve_script_path "$SCRIPT_SOURCE")"
 [[ -n "$SCRIPT_PATH" ]] || SCRIPT_PATH="$SCRIPT_SOURCE"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)"
-ROOT_DIR="$(find_app_root "$SCRIPT_DIR" || true)"
+ROOT_DIR="$SCRIPT_DIR"
+if [[ ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
+  ROOT_DIR="$(find_app_root "$SCRIPT_DIR" || true)"
+fi
 if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
   echo "[ERROR] PT-BDtool runtime not found: lib/ui.sh" >&2
   echo "[ERROR] Current entry path: $SCRIPT_PATH" >&2
