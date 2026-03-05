@@ -129,21 +129,18 @@ resolve_default_download_dir() {
   local user_home=""
   user_home="$(resolve_effective_home)" || return 1
 
+  local desktop_xdg=""
   local desktop_en="$user_home/Desktop"
   local desktop_zh="$user_home/桌面"
-  if [[ "$user_home" == "/root" && ${EUID:-$(id -u)} -eq 0 ]]; then
-    if [[ -d "/home/15sir" ]]; then
-      user_home="/home/15sir"
-      desktop_en="$user_home/Desktop"
-      desktop_zh="$user_home/桌面"
-    elif [[ -d "/opt/PT-BDtool/bdtool-output" ]]; then
-      mkdir -p "/opt/PT-BDtool/bdtool-output/PT-BDtool"
-      printf "%s" "/opt/PT-BDtool/bdtool-output/PT-BDtool"
-      return 0
-    fi
+  if command -v xdg-user-dir >/dev/null 2>&1; then
+    desktop_xdg="$(HOME="$user_home" xdg-user-dir DESKTOP 2>/dev/null || true)"
   fi
+
   local base_dir=""
-  if [[ -d "$desktop_en" ]]; then
+  if [[ -n "$desktop_xdg" && "$desktop_xdg" != "$user_home" ]]; then
+    mkdir -p "$desktop_xdg"
+    base_dir="$desktop_xdg"
+  elif [[ -d "$desktop_en" ]]; then
     base_dir="$desktop_en"
   elif [[ -d "$desktop_zh" ]]; then
     base_dir="$desktop_zh"
@@ -327,4 +324,32 @@ resolve_source_output_layout() {
   BDTOOL_SOURCE_INFO_ROOT="$(dirname "$base_dir")/信息"
   BDTOOL_SOURCE_GEN_NAME="$(basename "$base_dir")"
   [[ -n "$BDTOOL_SOURCE_INFO_ROOT" && -n "$BDTOOL_SOURCE_GEN_NAME" ]]
+}
+
+bdinfo_report_valid() {
+  local report_file="${1:-}"
+  [[ -s "$report_file" ]] || return 1
+  LC_ALL=C grep -Eiq '(playlist|mpls)' "$report_file" || return 1
+  LC_ALL=C grep -Eiq '(clip|m2ts)' "$report_file" || return 1
+  LC_ALL=C grep -Eiq 'video' "$report_file" || return 1
+  LC_ALL=C grep -Eiq 'audio' "$report_file" || return 1
+  LC_ALL=C grep -Eiq '(stream|codec|bitrate|kbps|avc|hevc|vc-1|dts|truehd|lpcm|aac)' "$report_file" || return 1
+}
+
+find_valid_bdinfo_report() {
+  local report_dir="${1:-}"
+  local candidate=""
+  [[ -d "$report_dir" ]] || return 1
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if bdinfo_report_valid "$candidate"; then
+      printf "%s" "$candidate"
+      return 0
+    fi
+  done < <(
+    find "$report_dir" -maxdepth 1 -type f -name '*.txt' -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr \
+      | sed -E 's/^[^ ]+ //'
+  )
+  return 1
 }

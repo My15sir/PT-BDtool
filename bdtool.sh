@@ -284,25 +284,85 @@ bt_write_mediainfo() {
   mediainfo "$video" > "$out_file"
 }
 
+bt_bdinfo_report_valid() {
+  local report_file="${1:-}"
+  if declare -F bdinfo_report_valid >/dev/null 2>&1; then
+    bdinfo_report_valid "$report_file"
+    return $?
+  fi
+  [[ -s "$report_file" ]] || return 1
+  LC_ALL=C grep -Eiq '(playlist|mpls)' "$report_file" || return 1
+  LC_ALL=C grep -Eiq '(clip|m2ts)' "$report_file" || return 1
+  LC_ALL=C grep -Eiq 'video' "$report_file" || return 1
+  LC_ALL=C grep -Eiq 'audio' "$report_file" || return 1
+  LC_ALL=C grep -Eiq '(stream|codec|bitrate|kbps|avc|hevc|vc-1|dts|truehd|lpcm|aac)' "$report_file" || return 1
+}
+
+bt_find_valid_bdinfo_report() {
+  local info_dir="${1:-}"
+  local candidate=""
+  if declare -F find_valid_bdinfo_report >/dev/null 2>&1; then
+    find_valid_bdinfo_report "$info_dir"
+    return $?
+  fi
+  [[ -d "$info_dir" ]] || return 1
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if bt_bdinfo_report_valid "$candidate"; then
+      printf "%s" "$candidate"
+      return 0
+    fi
+  done < <(
+    find "$info_dir" -maxdepth 1 -type f -name '*.txt' -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr \
+      | sed -E 's/^[^ ]+ //'
+  )
+  return 1
+}
+
+bt_write_bdinfo_report() {
+  local bd_path="$1"
+  local info_dir="$2"
+  local stdout_file="$3"
+  BDInfo -w "$bd_path" "$info_dir" > "$stdout_file"
+}
+
 bt_run_bdinfo_report() {
   local bd_path="$1"
   local info_dir="$2"
+  local latest_txt=""
+  local stdout_txt=""
+  local err_msg=""
 
   bt_need_cmd BDInfo
   mkdir -p "$info_dir"
 
+  stdout_txt="$info_dir/.bdinfo_stdout_$$.txt"
+  rm -f "$info_dir/BDInfo_1.txt" "$stdout_txt"
   bt_log "BDInfo: run on $bd_path"
-  execute_with_spinner "生成 BDInfo" BDInfo -w "$bd_path" "$info_dir" || bt_die "BDInfo 执行失败：$bd_path"
-
-  local latest_txt
-  latest_txt="$(find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
-  if [[ -n "$latest_txt" && -f "$latest_txt" ]]; then
-    cp -f "$latest_txt" "$info_dir/BDInfo_1.txt"
-    find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
-    return 0
+  if ! execute_with_spinner "生成 BDInfo" bt_write_bdinfo_report "$bd_path" "$info_dir" "$stdout_txt"; then
+    err_msg="BDInfo 执行失败：$bd_path"
+  else
+    if bt_bdinfo_report_valid "$stdout_txt"; then
+      latest_txt="$stdout_txt"
+    else
+      latest_txt="$(bt_find_valid_bdinfo_report "$info_dir" || true)"
+    fi
+    if [[ -z "$latest_txt" ]]; then
+      err_msg="BDInfo 输出无效：缺少 playlist/clip/video/audio/stream 核心字段（$bd_path）"
+    else
+      if [[ "$latest_txt" != "$info_dir/BDInfo_1.txt" ]]; then
+        cp -f "$latest_txt" "$info_dir/BDInfo_1.txt" || err_msg="BDInfo 报告归档失败：$info_dir/BDInfo_1.txt"
+      fi
+      if [[ -z "$err_msg" ]] && ! bt_bdinfo_report_valid "$info_dir/BDInfo_1.txt"; then
+        err_msg="BDInfo 输出无效：$info_dir/BDInfo_1.txt"
+      fi
+    fi
   fi
 
-  [[ -f "$info_dir/BDInfo_1.txt" ]] || bt_die "BDInfo 已执行，但未在 $info_dir 发现可归档的报告文件"
+  find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
+  rm -f "$stdout_txt"
+  [[ -z "$err_msg" ]] || bt_die "$err_msg"
 }
 
 bt_finalize_video_artifacts() {
@@ -408,7 +468,7 @@ bt_make_disc_screenshots() {
 bt_finalize_disc_artifacts() {
   local info_dir="$1"
   local i keep_re='^截图_[1-6]\.png$|^BDInfo_1\.txt$' f cnt
-  [[ -s "$info_dir/BDInfo_1.txt" ]] || bt_die "生成失败：缺少有效 BDInfo_1.txt（$info_dir）"
+  bt_bdinfo_report_valid "$info_dir/BDInfo_1.txt" || bt_die "生成失败：缺少有效 BDInfo_1.txt（$info_dir）"
   for i in 1 2 3 4 5 6; do
     [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
   done
