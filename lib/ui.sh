@@ -124,6 +124,8 @@ resolve_default_download_dir() {
 setup_bundle_runtime() {
   local app_root="${1:-}"
   local bundle_dir="${PTBD_BUNDLE_DIR:-}"
+  local bundle_bin=""
+  local bundle_lib=""
   if [[ -z "$bundle_dir" && -n "$app_root" ]]; then
     bundle_dir="$app_root/third_party/bundle/linux-amd64"
   fi
@@ -131,9 +133,17 @@ setup_bundle_runtime() {
     bundle_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/third_party/bundle/linux-amd64"
   fi
 
-  if [[ -d "$bundle_dir/bin" ]]; then
-    PATH="$bundle_dir/bin:$PATH"
-    export PATH
+  bundle_bin="$bundle_dir/bin"
+  bundle_lib="$bundle_dir/lib"
+
+  if [[ -d "$bundle_bin" ]]; then
+    if bundle_runtime_healthy "$bundle_bin" "$bundle_lib"; then
+      PATH="$bundle_bin:$PATH"
+      export PATH
+    else
+      log_warn "bundle runtime check failed, skip bundle/bin PATH injection"
+      log_warn "install system deps: apt-get update && apt-get install -y ffmpeg mediainfo"
+    fi
   fi
   # Do not export bundle lib path globally. It can poison system tools
   # (for example mkdir/coreutils) on some VPS images.
@@ -141,6 +151,23 @@ setup_bundle_runtime() {
     BDTOOL_BUNDLE_DIR="$bundle_dir"
     export BDTOOL_BUNDLE_DIR
   fi
+}
+
+bundle_runtime_healthy() {
+  local bundle_bin="$1"
+  local bundle_lib="$2"
+  local ffprobe_bin="$bundle_bin/ffprobe"
+  local mediainfo_bin="$bundle_bin/mediainfo"
+  local ld_path=""
+  [[ -x "$ffprobe_bin" && -x "$mediainfo_bin" ]] || return 1
+  ld_path="$bundle_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  if ! LD_LIBRARY_PATH="$ld_path" "$ffprobe_bin" -version >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! LD_LIBRARY_PATH="$ld_path" "$mediainfo_bin" --Version >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
 }
 
 ensure_output_root() {
