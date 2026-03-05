@@ -4,13 +4,15 @@ For beginner-first CN guide with full copy-paste flows, use `README.md`.
 
 ## Quick Start (Copy/Paste)
 
-Purpose: clone, prepare offline bundle, install, and verify.
+Purpose: clone or update repo, install, and verify.
 ```bash
 cd ~
-git clone https://github.com/My15sir/PT-BDtool.git
-cd PT-BDtool
-bash scripts/fetch-deps.sh
-bash scripts/build-bundle.sh
+if [ -d PT-BDtool/.git ]; then
+  cd PT-BDtool && git pull --ff-only
+else
+  git clone https://github.com/My15sir/PT-BDtool.git
+  cd PT-BDtool
+fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
@@ -38,8 +40,8 @@ Purpose: fix stale wrappers (`/usr/local/bin/lib/ui.sh` not found or undefined f
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 cd ~/PT-BDtool
-bash scripts/fetch-deps.sh
-bash scripts/build-bundle.sh
+rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start 2>/dev/null || true
+rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start"
 bash install.sh --offline
 bdtool --help
 ```

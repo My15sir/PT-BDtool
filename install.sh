@@ -153,6 +153,21 @@ sync_bundle() {
   COPIED_COUNT=$((COPIED_COUNT + 1))
 }
 
+install_entrypoints() {
+  local install_root="$1"
+  local bin_dir="$2"
+  local bdtool_link="$bin_dir/bdtool"
+  local start_link="$bin_dir/ptbd-start"
+
+  mkdir -p "$bin_dir"
+  # Force-replace stale copied wrappers (regular files) from old versions.
+  [[ -e "$bdtool_link" && ! -L "$bdtool_link" ]] && rm -f "$bdtool_link"
+  [[ -e "$start_link" && ! -L "$start_link" ]] && rm -f "$start_link"
+
+  ln -sfn "$install_root/bdtool" "$bdtool_link"
+  ln -sfn "$install_root/ptbd-start.sh" "$start_link"
+}
+
 post_install_self_check() {
   local install_root="$1"
   local bin_dir="$2"
@@ -199,6 +214,14 @@ post_install_self_check() {
   fi
   if ! "$install_root/ptbd-start.sh" --help >/dev/null 2>&1; then
     err "self-check failed: $install_root/ptbd-start.sh --help"
+    fail=1
+  fi
+  if ! "$bin_dir/bdtool" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/bdtool --help"
+    fail=1
+  fi
+  if ! "$bin_dir/ptbd-start" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/ptbd-start --help"
     fail=1
   fi
 
@@ -273,7 +296,9 @@ PRECHECK_TS="$(date +%s)"
 log "precheck start"
 if ! bundle_dep_status "${required_bundle_files[@]}"; then
   err "offline bundle dependencies are incomplete."
-  err "Run: bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh"
+  err "Fix option A (if ffmpeg/ffprobe/mediainfo/BDInfo already installed):"
+  err "  bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh"
+  err "Fix option B (if they are NOT installed): use official release tarball then run install.sh --offline."
   exit 1
 fi
 log "precheck done (elapsed=$(elapsed_since "$PRECHECK_TS"))"
@@ -308,9 +333,7 @@ if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then
 else
   BIN_DIR="${PTBD_BIN_DIR:-$HOME/.local/bin}"
 fi
-mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_ROOT/bdtool" "$BIN_DIR/bdtool"
-ln -sf "$INSTALL_ROOT/ptbd-start.sh" "$BIN_DIR/ptbd-start"
+install_entrypoints "$INSTALL_ROOT" "$BIN_DIR"
 if [[ "$BIN_DIR" == "$HOME/.local/bin" ]]; then
   echo "[INFO] Ensure ~/.local/bin is in PATH" >&2
 fi

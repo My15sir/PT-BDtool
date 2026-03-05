@@ -6,13 +6,15 @@ Language: 中文（本页） | English quick guide: `README.en.md`
 
 ## 快速开始（复制即用）
 
-作用：在线拉取仓库并完成离线安装（推荐新手）。
+作用：在线拉取仓库并完成离线安装（推荐新手，已含“目录已存在”处理）。
 ```bash
 cd ~
-git clone https://github.com/My15sir/PT-BDtool.git
-cd PT-BDtool
-bash scripts/fetch-deps.sh
-bash scripts/build-bundle.sh
+if [ -d PT-BDtool/.git ]; then
+  cd PT-BDtool && git pull --ff-only
+else
+  git clone https://github.com/My15sir/PT-BDtool.git
+  cd PT-BDtool
+fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
@@ -68,8 +70,6 @@ cd ~/PT-BDtool
 set -e
 rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start"
 rm -rf "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
-bash scripts/fetch-deps.sh
-bash scripts/build-bundle.sh
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 bdtool --help
@@ -94,8 +94,8 @@ bdtool --help
 作用：修复不完整安装（通常是旧脚本或目录损坏）。
 ```bash
 cd ~/PT-BDtool
-bash scripts/fetch-deps.sh
-bash scripts/build-bundle.sh
+rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start 2>/dev/null || true
+rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start"
 bash install.sh --offline
 bdtool --help
 ```
@@ -111,7 +111,7 @@ bdtool --help
 成功时会看到什么：`command -v bdtool` 输出路径，帮助命令正常。
 
 ### 4) 报错：`offline bundle dependencies are incomplete`
-作用：补齐离线依赖后重装。
+作用：补齐离线依赖后重装（需要系统已有 ffmpeg/ffprobe/mediainfo/BDInfo）。
 ```bash
 cd ~/PT-BDtool
 bash scripts/fetch-deps.sh
@@ -119,6 +119,8 @@ bash scripts/build-bundle.sh
 bash install.sh --offline
 ```
 成功时会看到什么：安装预检查中 `ffmpeg/ffprobe/mediainfo/BDInfo` 均为 `dependency present`。
+
+如果系统没有上述命令：请改用官方发布离线包 `PT-BDtool-linux-amd64.tar.gz`，解压后直接 `bash install.sh --offline`。
 
 ## 维护者常用命令
 
