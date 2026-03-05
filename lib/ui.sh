@@ -136,7 +136,11 @@ setup_bundle_runtime() {
     export PATH
   fi
   if [[ -d "$bundle_dir/lib" ]]; then
-    LD_LIBRARY_PATH="$bundle_dir/lib:${LD_LIBRARY_PATH:-}"
+    if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$bundle_dir/lib"
+    else
+      LD_LIBRARY_PATH="$bundle_dir/lib"
+    fi
     export LD_LIBRARY_PATH
   fi
   if [[ -d "$bundle_dir" ]]; then
