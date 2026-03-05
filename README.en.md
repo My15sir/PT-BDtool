@@ -1,10 +1,10 @@
-# PT-BDtool (English)
+# PT-BDtool
 
-For beginner-first CN guide with full copy-paste flows, use `README.md`.
+This project is AI-generated.
+No feedback is accepted.
+Please troubleshoot issues by yourself.
 
-## Quick Start (Copy/Paste)
-
-Purpose: clone/update repo, install, and verify (stop immediately on error).
+## Copy This To Install
 ```bash
 set -euo pipefail
 cd ~
@@ -16,73 +16,20 @@ else
 fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
-bdtool --help
 pt --help
-pts --help
 ```
-Expected success: help output is shown (`Usage` or `用法` line).
 
-## Offline Install (Copy/Paste)
-
-Purpose: install from release bundle and fail fast when the tarball is missing.
-```bash
-set -euo pipefail
-cd ~
-test -f PT-BDtool-linux-amd64.tar.gz
-tar -xzf PT-BDtool-linux-amd64.tar.gz
-cd PT-BDtool-linux-amd64
-bash install.sh --offline
-export PATH="$HOME/.local/bin:$PATH"
-bdtool --help
-```
-Expected success: installer prints `post-install self-check done: PASS`.
-
-## One-shot Self Check
-
-Purpose: confirm install integrity and runtime commands.
+## Copy This To Start
 ```bash
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-command -v bdtool
-command -v ptbd-start
-command -v pt
-command -v pts
-bdtool --help >/dev/null
-bdtool doctor
-ptbd-start --help >/dev/null
-pt --help >/dev/null
-pts --help >/dev/null
-echo "PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)"
+pt
 ```
-Expected success: prints `PT-BDtool self-check PASS (bdtool/ptbd-start/pt/pts)`.
 
-## Music Input -> Spectrum Image (Copy/Paste)
-
-Purpose: process an audio file and generate `频谱图_1.png` + `mediainfo_1.txt`.
+## Copy This To Uninstall
 ```bash
 set -euo pipefail
-cd ~/PT-BDtool
-export PATH="$HOME/.local/bin:$PATH"
-mkdir -p ./bdtool-output/audio-demo
-ffmpeg -hide_banner -loglevel error -y -f lavfi -i "sine=frequency=1000:duration=8" ./demo-audio.wav
-bdtool ./demo-audio.wav --out ./bdtool-output/audio-demo
-info_dir="$(find ./bdtool-output/audio-demo -type d -name 信息 | head -n 1)"
-test -s "$info_dir/频谱图_1.png"
-test -s "$info_dir/mediainfo_1.txt"
-find "$info_dir" -maxdepth 1 -type f -printf '%f\n' | sort
+rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/pt" "$HOME/.local/bin/pts"
+rm -rf "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start /usr/local/bin/pt /usr/local/bin/pts 2>/dev/null || true
 ```
-Expected success: output list includes `频谱图_1.png` and `mediainfo_1.txt` (both non-empty).
-
-## Common Error Fix
-
-Purpose: fix stale wrappers (`/usr/local/bin/lib/ui.sh` not found or undefined function errors).
-```bash
-set -euo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-cd ~/PT-BDtool
-rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start 2>/dev/null || true
-rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start"
-bash install.sh --offline
-bdtool --help
-```
-Expected success: installer prints `post-install self-check done: PASS`.

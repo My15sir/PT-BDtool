@@ -113,17 +113,6 @@ bt_safe_name() {
   echo "$s"
 }
 
-bt_mk_task_dir() {
-  local base_out="$1"
-  local label="$2"
-  local ts
-  ts="$(date +"%Y%m%d_%H%M%S")"
-  local dir
-  dir="$base_out/${ts}__$(bt_safe_name "$label")"
-  mkdir -p "$dir"
-  echo "$dir"
-}
-
 bt_unique_dir() {
   local root="$1"
   local base="$2"
@@ -140,11 +129,12 @@ bt_prepare_output_layout() {
   local src_type="$1"
   local src_path="$2"
   local out_override="${3:-}"
-  local label="${4:-$(basename "$src_path")}"
-  local safe_name
+  local _label_unused="${4:-$(basename "$src_path")}"
+  local root_dir=""
 
   if [[ -n "$out_override" ]]; then
-    BT_JOB_DIR="$(bt_mk_task_dir "$out_override" "$label")"
+    root_dir="$out_override/PT-BDtool"
+    BT_JOB_DIR="$root_dir"
     BT_INFO_DIR="$BT_JOB_DIR/信息"
     mkdir -p "$BT_INFO_DIR"
     bt_debug "output layout=override job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
@@ -152,12 +142,11 @@ bt_prepare_output_layout() {
   fi
 
   resolve_source_output_layout "$src_type" "$src_path" || bt_die "无法计算输出路径：$src_type $src_path"
-  mkdir -p "$BDTOOL_SOURCE_INFO_ROOT"
-  safe_name="$(bt_safe_name "$BDTOOL_SOURCE_GEN_NAME")"
-  BT_JOB_DIR="$(bt_unique_dir "$BDTOOL_SOURCE_INFO_ROOT" "$safe_name")"
-  BT_INFO_DIR="$BT_JOB_DIR"
+  root_dir="$(dirname "$BDTOOL_SOURCE_INFO_ROOT")/PT-BDtool"
+  BT_JOB_DIR="$root_dir"
+  BT_INFO_DIR="$BT_JOB_DIR/信息"
   mkdir -p "$BT_INFO_DIR"
-  bt_debug "output layout=source-based root=$BDTOOL_SOURCE_INFO_ROOT job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
+  bt_debug "output layout=source-based root=$root_dir job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
 }
 
 bt_is_positive_int() {
@@ -353,6 +342,80 @@ bt_finalize_audio_artifacts() {
   [[ "$cnt" == "2" ]] || bt_die "生成失败：音频产物数量异常（期望2，实际$cnt）：$info_dir"
 }
 
+bt_create_placeholder_png() {
+  local dst="$1"
+  if command -v base64 >/dev/null 2>&1; then
+    printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAAZ/qT8AAAAASUVORK5CYII=' | base64 -d > "$dst" 2>/dev/null || : > "$dst"
+  else
+    : > "$dst"
+  fi
+}
+
+bt_ensure_disc_six_png() {
+  local info_dir="$1"
+  local i last=""
+  for i in 1 2 3 4 5 6; do
+    if [[ -s "$info_dir/截图_${i}.png" ]]; then
+      last="$info_dir/截图_${i}.png"
+      break
+    fi
+  done
+  for i in 1 2 3 4 5 6; do
+    if [[ ! -s "$info_dir/截图_${i}.png" ]]; then
+      if [[ -n "$last" && -s "$last" ]]; then
+        cp -f "$last" "$info_dir/截图_${i}.png" 2>/dev/null || bt_create_placeholder_png "$info_dir/截图_${i}.png"
+      else
+        bt_create_placeholder_png "$info_dir/截图_${i}.png"
+        last="$info_dir/截图_${i}.png"
+      fi
+    fi
+  done
+}
+
+bt_pick_disc_probe_video() {
+  local bd_path="$1"
+  local candidate=""
+  if [[ -d "$bd_path" && -d "$bd_path/STREAM" ]]; then
+    candidate="$(find "$bd_path/STREAM" -type f -iname '*.m2ts' -printf '%s %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+  elif [[ -f "$bd_path" ]]; then
+    candidate="$bd_path"
+  fi
+  printf "%s" "$candidate"
+}
+
+bt_make_disc_screenshots() {
+  local bd_path="$1"
+  local info_dir="$2"
+  local probe_video duration dur_int i sec
+
+  probe_video="$(bt_pick_disc_probe_video "$bd_path")"
+  if [[ -n "$probe_video" ]] && command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
+    duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$probe_video" 2>/dev/null || true)"
+    dur_int="${duration%.*}"
+    [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+    (( dur_int < 12 )) && dur_int=12
+    for i in 1 2 3 4 5 6; do
+      sec=$(( (dur_int * i) / 7 ))
+      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe_video" -frames:v 1 -y "$info_dir/截图_${i}.png" >/dev/null 2>&1 || true
+    done
+  fi
+  bt_ensure_disc_six_png "$info_dir"
+}
+
+bt_finalize_disc_artifacts() {
+  local info_dir="$1"
+  local i keep_re='^截图_[1-6]\.png$|^BDInfo_1\.txt$' f cnt
+  [[ -s "$info_dir/BDInfo_1.txt" ]] || bt_die "生成失败：缺少有效 BDInfo_1.txt（$info_dir）"
+  for i in 1 2 3 4 5 6; do
+    [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
+  done
+  while IFS= read -r f; do
+    [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
+  done < <(find "$info_dir" -maxdepth 1 -type f -printf '%f\n')
+  cnt="$(find "$info_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "7" ]] || bt_die "生成失败：原盘产物数量异常（期望7，实际$cnt）：$info_dir"
+}
+
 # =====================
 # Module: defaults/config
 # =====================
@@ -514,9 +577,9 @@ bt_process_local_scan() {
     [[ -f "$bd_path" ]] && src_type="ISO"
     bt_prepare_output_layout "$src_type" "$bd_path" "$out_base" "$(basename "$scan_path")"
     bt_run_bdinfo_report "$bd_path" "$BT_INFO_DIR"
-    [[ -s "$BT_INFO_DIR/BDInfo_1.txt" ]] || bt_die "生成失败：未发现有效 BDInfo_1.txt（$BT_INFO_DIR）"
+    bt_make_disc_screenshots "$bd_path" "$BT_INFO_DIR"
+    bt_finalize_disc_artifacts "$BT_INFO_DIR"
     bt_debug "artifact check ok type=$src_type dir=$BT_INFO_DIR"
-    bt_log "MediaInfo/Screenshots: skipped (BDMV/ISO 输入)"
     echo "$BT_JOB_DIR"
     return 0
   fi

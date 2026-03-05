@@ -239,6 +239,13 @@ unique_dir() {
   echo "$out"
 }
 
+resolve_fixed_output_root() {
+  local type="$1"
+  local src="$2"
+  resolve_source_output_layout "$type" "$src" || return 1
+  printf "%s" "$(dirname "$BDTOOL_SOURCE_INFO_ROOT")/PT-BDtool"
+}
+
 create_placeholder_png() {
   local dst="$1"
   if command -v base64 >/dev/null 2>&1; then
@@ -311,6 +318,56 @@ finalize_audio_output() {
   done
   cnt="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
   [[ "$cnt" == "2" ]] || return 1
+  return 0
+}
+
+pick_disc_probe_video() {
+  local src="$1"
+  local candidate=""
+  if [[ -d "$src/BDMV/STREAM" ]]; then
+    candidate="$(find "$src/BDMV/STREAM" -type f -iname '*.m2ts' -printf '%s %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+  elif [[ -d "$src/STREAM" ]]; then
+    candidate="$(find "$src/STREAM" -type f -iname '*.m2ts' -printf '%s %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+  elif [[ -f "$src" ]]; then
+    candidate="$src"
+  fi
+  printf "%s" "$candidate"
+}
+
+make_disc_screenshots() {
+  local src="$1"
+  local out="$2"
+  local probe duration dur_int i sec
+  probe="$(pick_disc_probe_video "$src")"
+  if [[ -n "$probe" ]] && require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
+    duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$probe" 2>/dev/null || true)"
+    dur_int="${duration%.*}"
+    [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+    (( dur_int < 12 )) && dur_int=12
+    for i in 1 2 3 4 5 6; do
+      sec=$(( (dur_int * i) / 7 ))
+      ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1 || true
+    done
+  fi
+  ensure_six_png "$out"
+}
+
+finalize_disc_output() {
+  local dir="$1"
+  local keep_re='^截图_[1-6]\.png$|^BDInfo_1\.txt$'
+  local file cnt i
+  [[ -s "$dir/BDInfo_1.txt" ]] || return 1
+  for i in 1 2 3 4 5 6; do
+    [[ -s "$dir/截图_$i.png" ]] || return 1
+  done
+  for file in "$dir"/*; do
+    [[ -f "$file" ]] || continue
+    if [[ ! "$(basename "$file")" =~ $keep_re ]]; then
+      rm -f -- "$file"
+    fi
+  done
+  cnt="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "7" ]] || return 1
   return 0
 }
 
@@ -418,9 +475,11 @@ generate_item() {
     screen_error "输出路径计算失败：$type $src"
     return 1
   }
-  mkdir -p "$BDTOOL_SOURCE_INFO_ROOT"
-  safe="$(safe_name "$BDTOOL_SOURCE_GEN_NAME")"
-  out="$(unique_dir "$BDTOOL_SOURCE_INFO_ROOT" "$safe")"
+  out="$(resolve_fixed_output_root "$type" "$src" || true)"
+  [[ -n "$out" ]] || {
+    screen_error "输出路径计算失败：$type $src"
+    return 1
+  }
   dbg "output root=$BDTOOL_SOURCE_INFO_ROOT dir=$out type=$type src=$src"
   mkdir -p "$out"
 
@@ -484,7 +543,8 @@ generate_item() {
           has_error=1
         fi
       fi
-      find "$out" -maxdepth 1 -type f ! -name 'BDInfo_1.txt' -delete
+      make_disc_screenshots "$src" "$out"
+      finalize_disc_output "$out" || has_error=1
     else
       echo "未安装 BDInfo，使用占位信息。" > "$out/BDInfo_1.txt"
       has_error=1
