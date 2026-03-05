@@ -249,6 +249,12 @@ post_install_self_check() {
   bash install.sh --offline
   "$bin_dir/bdtool" --help
 EOF
+    {
+      echo "[DIAG] command -v bdtool: $(command -v bdtool 2>/dev/null || echo missing)"
+      echo "[DIAG] command -v ptbd-start: $(command -v ptbd-start 2>/dev/null || echo missing)"
+      [[ -e "$bin_dir/bdtool" ]] && ls -l "$bin_dir/bdtool" || echo "[DIAG] missing: $bin_dir/bdtool"
+      [[ -e "$bin_dir/ptbd-start" ]] && ls -l "$bin_dir/ptbd-start" || echo "[DIAG] missing: $bin_dir/ptbd-start"
+    } >&2
     exit 1
   fi
 
