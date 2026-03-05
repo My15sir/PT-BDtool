@@ -251,21 +251,36 @@ ensure_six_png() {
   local last=""
   local i
   for i in 1 2 3 4 5 6; do
-    if [[ -f "$dir/$i.png" ]]; then
-      last="$dir/$i.png"
+    if [[ -f "$dir/截图_$i.png" ]]; then
+      last="$dir/截图_$i.png"
       break
     fi
   done
   for i in 1 2 3 4 5 6; do
-    if [[ ! -f "$dir/$i.png" ]]; then
+    if [[ ! -f "$dir/截图_$i.png" ]]; then
       if [[ -n "$last" && -f "$last" ]]; then
-        cp -f "$last" "$dir/$i.png" 2>/dev/null || create_placeholder_png "$dir/$i.png"
+        cp -f "$last" "$dir/截图_$i.png" 2>/dev/null || create_placeholder_png "$dir/截图_$i.png"
       else
-        create_placeholder_png "$dir/$i.png"
-        last="$dir/$i.png"
+        create_placeholder_png "$dir/截图_$i.png"
+        last="$dir/截图_$i.png"
       fi
     fi
   done
+}
+
+finalize_video_output() {
+  local dir="$1"
+  local keep_re='^截图_[1-6]\.png$|^mediainfo_1\.txt$'
+  local file cnt
+  for file in "$dir"/*; do
+    [[ -f "$file" ]] || continue
+    if [[ ! "$(basename "$file")" =~ $keep_re ]]; then
+      rm -f -- "$file"
+    fi
+  done
+  cnt="$(find "$dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "7" ]] || return 1
+  return 0
 }
 
 is_video() {
@@ -380,12 +395,12 @@ generate_item() {
 
   if [[ "$type" == "VIDEO" ]]; then
     if require_runtime_cmd mediainfo; then
-      if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
-        echo "mediainfo 执行失败" > "$out/mediainfo.txt"
+      if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
+        echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
         has_error=1
       fi
     else
-      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
+      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
       has_error=1
     fi
 
@@ -397,7 +412,7 @@ generate_item() {
       (( dur_int < 12 )) && dur_int=12
       for i in 1 2 3 4 5 6; do
         sec=$(( (dur_int * i) / 7 ))
-        if ! ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1; then
+        if ! ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1; then
           has_error=1
         fi
       done
@@ -405,21 +420,23 @@ generate_item() {
       has_error=1
     fi
     ensure_six_png "$out"
+    finalize_video_output "$out" || has_error=1
   else
     if require_runtime_cmd BDInfo; then
       if [[ "$type" == "BDMV" ]]; then
-        if ! BDInfo -w "$src/BDMV" "$out" > "$out/bdinfo.txt" 2>/dev/null; then
-          echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+        if ! BDInfo -w "$src/BDMV" "$out" > "$out/BDInfo_1.txt" 2>/dev/null; then
+          echo "BDInfo 执行失败" > "$out/BDInfo_1.txt"
           has_error=1
         fi
       else
-        if ! BDInfo -w "$src" "$out" > "$out/bdinfo.txt" 2>/dev/null; then
-          echo "BDInfo 执行失败" > "$out/bdinfo.txt"
+        if ! BDInfo -w "$src" "$out" > "$out/BDInfo_1.txt" 2>/dev/null; then
+          echo "BDInfo 执行失败" > "$out/BDInfo_1.txt"
           has_error=1
         fi
       fi
+      find "$out" -maxdepth 1 -type f ! -name 'BDInfo_1.txt' -delete
     else
-      echo "未安装 BDInfo，使用占位信息。" > "$out/bdinfo.txt"
+      echo "未安装 BDInfo，使用占位信息。" > "$out/BDInfo_1.txt"
       has_error=1
     fi
   fi

@@ -250,7 +250,7 @@ bt_make_screenshots() {
 
   local idx=1
   while read -r sec; do
-    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/${idx}.png" || bt_die "截图失败：$video"
+    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/截图_${idx}.png" || bt_die "截图失败：$video"
     idx=$((idx + 1))
   done < <(bt_pick_random_seconds "$duration" "$n")
 }
@@ -261,7 +261,7 @@ bt_run_mediainfo_report() {
 
   bt_need_cmd mediainfo
   mkdir -p "$info_dir"
-  execute_with_spinner "生成 MediaInfo" bt_write_mediainfo "$video" "$info_dir/mediainfo.txt" || bt_die "MediaInfo 生成失败：$video"
+  execute_with_spinner "生成 MediaInfo" bt_write_mediainfo "$video" "$info_dir/mediainfo_1.txt" || bt_die "MediaInfo 生成失败：$video"
 }
 
 bt_write_mediainfo() {
@@ -281,13 +281,33 @@ bt_run_bdinfo_report() {
   execute_with_spinner "生成 BDInfo" BDInfo -w "$bd_path" "$info_dir" || bt_die "BDInfo 执行失败：$bd_path"
 
   local latest_txt
-  latest_txt="$(find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'bdinfo.txt' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
+  latest_txt="$(find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
   if [[ -n "$latest_txt" && -f "$latest_txt" ]]; then
-    cp -f "$latest_txt" "$info_dir/bdinfo.txt"
+    cp -f "$latest_txt" "$info_dir/BDInfo_1.txt"
+    find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
     return 0
   fi
 
-  [[ -f "$info_dir/bdinfo.txt" ]] || bt_die "BDInfo 已执行，但未在 $info_dir 发现可归档的报告文件"
+  [[ -f "$info_dir/BDInfo_1.txt" ]] || bt_die "BDInfo 已执行，但未在 $info_dir 发现可归档的报告文件"
+}
+
+bt_finalize_video_artifacts() {
+  local info_dir="$1"
+  local i
+  local keep_re='^截图_[1-6]\.png$|^mediainfo_1\.txt$'
+
+  for i in 1 2 3 4 5 6; do
+    [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
+  done
+  [[ -s "$info_dir/mediainfo_1.txt" ]] || bt_die "生成失败：未发现有效 mediainfo_1.txt（$info_dir）"
+
+  while IFS= read -r f; do
+    [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
+  done < <(find "$info_dir" -maxdepth 1 -type f -printf '%f\n')
+
+  local cnt
+  cnt="$(find "$info_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  [[ "$cnt" == "7" ]] || bt_die "生成失败：产物数量异常（期望7，实际$cnt）：$info_dir"
 }
 
 # =====================
@@ -380,13 +400,15 @@ bt_process_video_file() {
     bt_make_screenshots "$video" "$info_dir" "$OPT_SHOTS_N"
   fi
 
-  if [[ "$OPT_MEDIAINFO" == "1" && ! -s "$info_dir/mediainfo.txt" ]]; then
-    bt_die "生成失败：未发现有效 mediainfo.txt（$info_dir）"
+  if [[ "$OPT_MEDIAINFO" == "1" && ! -s "$info_dir/mediainfo_1.txt" ]]; then
+    bt_die "生成失败：未发现有效 mediainfo_1.txt（$info_dir）"
   fi
-  if [[ "$OPT_SHOTS" == "1" ]]; then
+  if [[ "$OPT_MEDIAINFO" == "1" && "$OPT_SHOTS" == "1" ]]; then
+    bt_finalize_video_artifacts "$info_dir"
+  elif [[ "$OPT_SHOTS" == "1" ]]; then
     local i
     for i in 1 2 3 4 5 6; do
-      [[ -s "$info_dir/$i.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/$i.png"
+      [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
     done
   fi
   bt_debug "artifact check ok type=VIDEO dir=$info_dir"
@@ -426,7 +448,7 @@ bt_process_local_scan() {
     [[ -f "$bd_path" ]] && src_type="ISO"
     bt_prepare_output_layout "$src_type" "$bd_path" "$out_base" "$(basename "$scan_path")"
     bt_run_bdinfo_report "$bd_path" "$BT_INFO_DIR"
-    [[ -s "$BT_INFO_DIR/bdinfo.txt" ]] || bt_die "生成失败：未发现有效 bdinfo.txt（$BT_INFO_DIR）"
+    [[ -s "$BT_INFO_DIR/BDInfo_1.txt" ]] || bt_die "生成失败：未发现有效 BDInfo_1.txt（$BT_INFO_DIR）"
     bt_debug "artifact check ok type=$src_type dir=$BT_INFO_DIR"
     bt_log "MediaInfo/Screenshots: skipped (BDMV/ISO 输入)"
     echo "$BT_JOB_DIR"
