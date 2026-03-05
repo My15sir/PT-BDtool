@@ -135,14 +135,8 @@ setup_bundle_runtime() {
     PATH="$bundle_dir/bin:$PATH"
     export PATH
   fi
-  if [[ -d "$bundle_dir/lib" ]]; then
-    if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
-      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$bundle_dir/lib"
-    else
-      LD_LIBRARY_PATH="$bundle_dir/lib"
-    fi
-    export LD_LIBRARY_PATH
-  fi
+  # Do not export bundle lib path globally. It can poison system tools
+  # (for example mkdir/coreutils) on some VPS images.
   if [[ -d "$bundle_dir" ]]; then
     BDTOOL_BUNDLE_DIR="$bundle_dir"
     export BDTOOL_BUNDLE_DIR
