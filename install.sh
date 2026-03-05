@@ -349,6 +349,8 @@ else
   BIN_DIR="${PTBD_BIN_DIR:-$HOME/.local/bin}"
 fi
 install_entrypoints "$INSTALL_ROOT" "$BIN_DIR"
+# Refresh command lookup cache so post-check sees the new symlink entrypoints.
+hash -r 2>/dev/null || true
 if [[ "$BIN_DIR" == "$HOME/.local/bin" ]]; then
   echo "[INFO] Ensure ~/.local/bin is in PATH" >&2
 fi
