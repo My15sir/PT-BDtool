@@ -24,6 +24,25 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "missing command: $1"; exit 1; }
 }
 
+validate_fetch_mode() {
+  case "$PTBD_FETCH_MODE" in
+    auto|remote|system) ;;
+    *)
+      err "invalid PTBD_FETCH_MODE=$PTBD_FETCH_MODE (use: auto|remote|system)"
+      err "copy-paste fix: PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh"
+      exit 2
+      ;;
+  esac
+}
+
+print_mode_help() {
+  log "mode=$PTBD_FETCH_MODE lock_file=$LOCK_FILE"
+  log "mode behaviors:"
+  log "  - system: only use binaries from PATH (system:// entries required)"
+  log "  - remote: only download from http(s) URLs (system:// entries are rejected)"
+  log "  - auto:   prefer URL behavior in lock file; http(s) download may fallback to system PATH"
+}
+
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -91,11 +110,24 @@ fetch_one() {
   log "processing $name version=$version"
 
   rm -f "$downloaded"
+  if [[ "$PTBD_FETCH_MODE" == "remote" && "$url" == system://* ]]; then
+    err "lock entry for $name is system:// but PTBD_FETCH_MODE=remote forbids PATH fallback"
+    err "copy-paste fix A (recommended here): PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh"
+    err "copy-paste fix B: update scripts/deps.env to use http(s) URL for $name"
+    return 1
+  fi
+
   if [[ "$PTBD_FETCH_MODE" == "system" || "$url" == system://* ]]; then
     local cmd_name="${url#system://}"
     local src_bin
     src_bin="$(command -v "$cmd_name" 2>/dev/null || true)"
-    [[ -n "$src_bin" ]] || { err "$name not found in PATH ($cmd_name)"; return 1; }
+    if [[ -z "$src_bin" ]]; then
+      err "$name not found in PATH ($cmd_name)"
+      err "copy-paste fix A (Ubuntu/Debian sample):"
+      err "  apt-get update && apt-get install -y ffmpeg mediainfo"
+      err "copy-paste fix B (if using release bundle): skip fetch-deps and use extracted bundle + bash install.sh --offline"
+      return 1
+    fi
     copy_binary_and_libs "$src_bin" "$target_path"
     log "using system binary: $src_bin -> $target_path"
   else
@@ -137,11 +169,13 @@ fetch_one() {
 }
 
 main() {
+  validate_fetch_mode
   need_cmd awk
   need_cmd sed
   need_cmd tar
   need_cmd timeout
   mkdir -p "$BIN_DIR" "$LIB_DIR" "$TMP_DIR"
+  print_mode_help
 
   while IFS='|' read -r name version url sha256 target; do
     [[ -n "${name:-}" ]] || continue
@@ -160,6 +194,9 @@ main() {
 
   log "summary: success=$success_count fail=$fail_count elapsed=${elapsed}s"
   if (( fail_count > 0 )); then
+    err "dependency fetch failed under PTBD_FETCH_MODE=$PTBD_FETCH_MODE"
+    err "copy-paste retry (system mode): PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh"
+    err "copy-paste retry (remote mode): PTBD_FETCH_MODE=remote bash scripts/fetch-deps.sh"
     exit 1
   fi
 

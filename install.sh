@@ -173,6 +173,8 @@ post_install_self_check() {
   local bin_dir="$2"
   local fail=0
   local f=""
+  local resolved_bdtool=""
+  local resolved_start=""
   local required_files=(
     "$install_root/bdtool"
     "$install_root/bdtool.sh"
@@ -222,6 +224,19 @@ post_install_self_check() {
   fi
   if ! "$bin_dir/ptbd-start" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-start --help"
+    fail=1
+  fi
+
+  resolved_bdtool="$(command -v bdtool 2>/dev/null || true)"
+  if [[ -n "$resolved_bdtool" && "$resolved_bdtool" != "$bin_dir/bdtool" ]]; then
+    err "PATH entry mismatch: command -v bdtool -> $resolved_bdtool (expected $bin_dir/bdtool)"
+    err "copy-paste fix: rm -f \"$resolved_bdtool\" && hash -r && \"$bin_dir/bdtool\" --help"
+    fail=1
+  fi
+  resolved_start="$(command -v ptbd-start 2>/dev/null || true)"
+  if [[ -n "$resolved_start" && "$resolved_start" != "$bin_dir/ptbd-start" ]]; then
+    err "PATH entry mismatch: command -v ptbd-start -> $resolved_start (expected $bin_dir/ptbd-start)"
+    err "copy-paste fix: rm -f \"$resolved_start\" && hash -r && \"$bin_dir/ptbd-start\" --help"
     fail=1
   fi
 
