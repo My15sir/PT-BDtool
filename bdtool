@@ -36,7 +36,7 @@ find_app_root() {
 
   for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" ]] || continue
-    if [[ -f "$candidate/lib/ui.sh" && -x "$candidate/bdtool" ]]; then
+    if [[ -f "$candidate/lib/ui.sh" ]]; then
       (
         cd -P "$candidate" 2>/dev/null && pwd
       )
