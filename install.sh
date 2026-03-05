@@ -153,6 +153,70 @@ sync_bundle() {
   COPIED_COUNT=$((COPIED_COUNT + 1))
 }
 
+post_install_self_check() {
+  local install_root="$1"
+  local bin_dir="$2"
+  local fail=0
+  local f=""
+  local required_files=(
+    "$install_root/bdtool"
+    "$install_root/bdtool.sh"
+    "$install_root/ptbd-start.sh"
+    "$install_root/lib/ui.sh"
+    "$install_root/lib/i18n.sh"
+    "$install_root/third_party/bundle/linux-amd64/bin/ffmpeg"
+    "$install_root/third_party/bundle/linux-amd64/bin/ffprobe"
+    "$install_root/third_party/bundle/linux-amd64/bin/mediainfo"
+    "$install_root/third_party/bundle/linux-amd64/bin/BDInfo"
+  )
+
+  log "post-install self-check start"
+  for f in "${required_files[@]}"; do
+    if [[ -e "$f" ]]; then
+      log "self-check ok: $f"
+    else
+      err "self-check missing: $f"
+      fail=1
+    fi
+  done
+
+  if [[ -x "$bin_dir/bdtool" ]]; then
+    log "self-check ok: entrypoint $bin_dir/bdtool"
+  else
+    err "self-check missing entrypoint: $bin_dir/bdtool"
+    fail=1
+  fi
+  if [[ -x "$bin_dir/ptbd-start" ]]; then
+    log "self-check ok: entrypoint $bin_dir/ptbd-start"
+  else
+    err "self-check missing entrypoint: $bin_dir/ptbd-start"
+    fail=1
+  fi
+
+  if ! "$install_root/bdtool" --help >/dev/null 2>&1; then
+    err "self-check failed: $install_root/bdtool --help"
+    fail=1
+  fi
+  if ! "$install_root/ptbd-start.sh" --help >/dev/null 2>&1; then
+    err "self-check failed: $install_root/ptbd-start.sh --help"
+    fail=1
+  fi
+
+  if [[ "$fail" -ne 0 ]]; then
+    err "post-install self-check failed."
+    cat >&2 <<EOF
+[HINT] Copy-paste fix:
+  cd "$SCRIPT_DIR"
+  rm -f "$bin_dir/bdtool" "$bin_dir/ptbd-start"
+  bash install.sh --offline
+  "$bin_dir/bdtool" --help
+EOF
+    exit 1
+  fi
+
+  log "post-install self-check done: PASS"
+}
+
 usage() {
   cat <<'USAGE'
 Usage: bash install.sh [--offline] [--lang zh|en] [--non-interactive]
@@ -215,9 +279,9 @@ fi
 log "precheck done (elapsed=$(elapsed_since "$PRECHECK_TS"))"
 
 if [[ -w "/opt" || ${EUID:-$(id -u)} -eq 0 ]]; then
-  INSTALL_ROOT="/opt/PT-BDtool"
+  INSTALL_ROOT="${PTBD_INSTALL_ROOT:-/opt/PT-BDtool}"
 else
-  INSTALL_ROOT="$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+  INSTALL_ROOT="${PTBD_INSTALL_ROOT:-$HOME/.local/share/pt-bdtool/PT-BDtool-app}"
 fi
 
 INSTALL_TS="$(date +%s)"
@@ -240,17 +304,21 @@ chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd-st
 log "install stage done (elapsed=$(elapsed_since "$INSTALL_TS"), copied=$COPIED_COUNT, skipped=$SKIPPED_COUNT)"
 
 if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then
-  ln -sf "$INSTALL_ROOT/bdtool" /usr/local/bin/bdtool
-  ln -sf "$INSTALL_ROOT/ptbd-start.sh" /usr/local/bin/ptbd-start
+  BIN_DIR="${PTBD_BIN_DIR:-/usr/local/bin}"
 else
-  mkdir -p "$HOME/.local/bin"
-  ln -sf "$INSTALL_ROOT/bdtool" "$HOME/.local/bin/bdtool"
-  ln -sf "$INSTALL_ROOT/ptbd-start.sh" "$HOME/.local/bin/ptbd-start"
+  BIN_DIR="${PTBD_BIN_DIR:-$HOME/.local/bin}"
+fi
+mkdir -p "$BIN_DIR"
+ln -sf "$INSTALL_ROOT/bdtool" "$BIN_DIR/bdtool"
+ln -sf "$INSTALL_ROOT/ptbd-start.sh" "$BIN_DIR/ptbd-start"
+if [[ "$BIN_DIR" == "$HOME/.local/bin" ]]; then
   echo "[INFO] Ensure ~/.local/bin is in PATH" >&2
 fi
 
+post_install_self_check "$INSTALL_ROOT" "$BIN_DIR"
+
 log "offline install complete: $INSTALL_ROOT"
-log "entrypoints: bdtool / ptbd-start"
+log "entrypoints: $BIN_DIR/bdtool / $BIN_DIR/ptbd-start"
 log "total elapsed: $(elapsed_since "$START_TS")"
 
 if [[ "$NON_INTERACTIVE" == "1" ]]; then

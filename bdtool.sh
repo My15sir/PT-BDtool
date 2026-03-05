@@ -23,14 +23,41 @@ bt_resolve_script_path() {
   echo "$src"
 }
 
+bt_find_app_root() {
+  local script_dir="$1"
+  local candidate=""
+  local -a candidates=()
+
+  [[ -n "${PTBDTOOL_ROOT:-}" ]] && candidates+=("${PTBDTOOL_ROOT}")
+  [[ -n "${PTBD_INSTALL_ROOT:-}" ]] && candidates+=("${PTBD_INSTALL_ROOT}")
+  candidates+=(
+    "$script_dir"
+    "$script_dir/.."
+    "/opt/PT-BDtool"
+    "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -f "$candidate/lib/ui.sh" ]]; then
+      (
+        cd -P "$candidate" 2>/dev/null && pwd
+      )
+      return 0
+    fi
+  done
+  return 1
+}
+
 BT_SCRIPT_PATH="$(bt_resolve_script_path "${BASH_SOURCE[0]}")"
 BT_SCRIPT_DIR="$(cd -P "$(dirname "$BT_SCRIPT_PATH")" && pwd)"
-BDTOOL_ROOT="$BT_SCRIPT_DIR"
-if [[ -f "$BT_SCRIPT_DIR/lib/ui.sh" ]]; then
+BDTOOL_ROOT="$(bt_find_app_root "$BT_SCRIPT_DIR" || true)"
+if [[ -n "$BDTOOL_ROOT" && -f "$BDTOOL_ROOT/lib/ui.sh" ]]; then
   # shellcheck source=lib/ui.sh
-  source "$BT_SCRIPT_DIR/lib/ui.sh"
-  setup_bundle_runtime "$BT_SCRIPT_DIR"
+  source "$BDTOOL_ROOT/lib/ui.sh"
+  setup_bundle_runtime "$BDTOOL_ROOT"
 else
+  BDTOOL_ROOT="$BT_SCRIPT_DIR"
   log_info() { printf "[INFO] %s\n" "$*" >&2; }
   log_warn() { printf "[WARN] %s\n" "$*" >&2; }
   log_err() { printf "[ERROR] %s\n" "$*" >&2; }
@@ -43,7 +70,14 @@ else
   ensure_log_dir() { local root="${1:-$BT_SCRIPT_DIR}"; BDTOOL_ROOT="$root"; BDTOOL_LOG_DIR="$root/bdtool-output/logs"; BDTOOL_RUN_LOG="$BDTOOL_LOG_DIR/run.log"; mkdir -p "$BDTOOL_LOG_DIR"; touch "$BDTOOL_RUN_LOG"; }
   setup_log_redirection() { ensure_log_dir "${1:-$BT_SCRIPT_DIR}"; [[ "${BDTOOL_LOG_REDIRECTED:-0}" == "1" ]] && return 0; BDTOOL_LOG_REDIRECTED=1; exec > >(tee -a "$BDTOOL_RUN_LOG") 2> >(tee -a "$BDTOOL_RUN_LOG" >&2); }
   execute_with_spinner() { local m="$1"; shift; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; "$@" >> "$BDTOOL_RUN_LOG" 2>&1; local r=$?; if [[ "$r" -eq 0 ]]; then log_success "$m 完成"; else log_err "$m 失败 (请查看 $BDTOOL_RUN_LOG)"; fi; return "$r"; }
-  die() { local m="${1:-执行失败}" c="${2:-1}"; ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"; log_err "$m"; log_err "详情日志：$BDTOOL_RUN_LOG"; exit "$c"; }
+  die() {
+    local m="${1:-执行失败}" c="${2:-1}"
+    ensure_log_dir "${BDTOOL_ROOT:-$BT_SCRIPT_DIR}"
+    log_err "$m"
+    log_err "详情日志：$BDTOOL_RUN_LOG"
+    log_err "修复建议：进入 PT-BDtool 目录执行 bash install.sh --offline，然后重试 bdtool --help"
+    exit "$c"
+  }
 fi
 
 APP_NAME="bdtool"

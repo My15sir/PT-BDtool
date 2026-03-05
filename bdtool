@@ -20,11 +20,45 @@ resolve_script_path() {
   echo "$src"
 }
 
+find_app_root() {
+  local script_dir="$1"
+  local candidate=""
+  local -a candidates=()
+
+  [[ -n "${PTBDTOOL_ROOT:-}" ]] && candidates+=("${PTBDTOOL_ROOT}")
+  [[ -n "${PTBD_INSTALL_ROOT:-}" ]] && candidates+=("${PTBD_INSTALL_ROOT}")
+  candidates+=(
+    "$script_dir"
+    "$script_dir/.."
+    "/opt/PT-BDtool"
+    "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -f "$candidate/lib/ui.sh" && -x "$candidate/bdtool" ]]; then
+      (
+        cd -P "$candidate" 2>/dev/null && pwd
+      )
+      return 0
+    fi
+  done
+  return 1
+}
+
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
-ROOT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
-if [[ ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
-  echo "[ERROR] Missing runtime file: $ROOT_DIR/lib/ui.sh" >&2
-  echo "[HINT] Reinstall with: bash install.sh --offline" >&2
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+ROOT_DIR="$(find_app_root "$SCRIPT_DIR" || true)"
+if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
+  echo "[ERROR] PT-BDtool runtime not found: lib/ui.sh" >&2
+  echo "[ERROR] Current entry path: $SCRIPT_PATH" >&2
+  echo "[HINT] You may be running an old copied wrapper under /usr/local/bin." >&2
+  echo "[HINT] Reinstall from PT-BDtool project root:" >&2
+  echo "  cd /path/to/PT-BDtool" >&2
+  echo "  bash install.sh --offline" >&2
+  echo "[HINT] Then verify:" >&2
+  echo "  command -v bdtool && ls -l \"\$(command -v bdtool)\"" >&2
+  echo "  bdtool --help" >&2
   exit 1
 fi
 # shellcheck source=lib/ui.sh

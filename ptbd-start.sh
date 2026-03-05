@@ -30,24 +30,51 @@ resolve_script_path() {
   echo "$src"
 }
 
+find_app_root() {
+  local script_dir="$1"
+  local candidate=""
+  local -a candidates=()
+
+  [[ -n "${PTBDTOOL_ROOT:-}" ]] && candidates+=("${PTBDTOOL_ROOT}")
+  [[ -n "${PTBD_INSTALL_ROOT:-}" ]] && candidates+=("${PTBD_INSTALL_ROOT}")
+  candidates+=(
+    "$script_dir"
+    "$script_dir/.."
+    "/opt/PT-BDtool"
+    "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -f "$candidate/lib/ui.sh" && ( -x "$candidate/bdtool" || -x "$candidate/bdtool.sh" ) ]]; then
+      (
+        cd -P "$candidate" 2>/dev/null && pwd
+      )
+      return 0
+    fi
+  done
+  return 1
+}
+
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
-if [[ -f "$SCRIPT_DIR/lib/ui.sh" ]]; then
+APP_ROOT="$(find_app_root "$SCRIPT_DIR" || true)"
+if [[ -n "$APP_ROOT" && -f "$APP_ROOT/lib/ui.sh" ]]; then
   # shellcheck source=lib/ui.sh
-  source "$SCRIPT_DIR/lib/ui.sh"
-  setup_bundle_runtime "$SCRIPT_DIR"
+  source "$APP_ROOT/lib/ui.sh"
+  setup_bundle_runtime "$APP_ROOT"
 fi
 
 echo "================================"
 echo "Starting PT-BDtool workflow..."
 echo "================================"
 
-if [[ -x "$SCRIPT_DIR/bdtool" ]]; then
-  exec "$SCRIPT_DIR/bdtool" "$@"
+if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool" ]]; then
+  exec "$APP_ROOT/bdtool" "$@"
 fi
 
-if [[ -x "$SCRIPT_DIR/bdtool.sh" ]]; then
-  exec "$SCRIPT_DIR/bdtool.sh" "$@"
+if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool.sh" ]]; then
+  exec "$APP_ROOT/bdtool.sh" "$@"
 fi
 
 if command -v bdtool >/dev/null 2>&1; then
@@ -55,5 +82,6 @@ if command -v bdtool >/dev/null 2>&1; then
 fi
 
 echo "[ERROR] Cannot find bdtool entrypoint." >&2
-echo "Tried: \`bdtool\`, \`$SCRIPT_DIR/bdtool\`, \`$SCRIPT_DIR/bdtool.sh\`" >&2
+echo "[HINT] Reinstall from project root: bash install.sh --offline" >&2
+echo "Tried: \`bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool.sh\`" >&2
 exit 1
