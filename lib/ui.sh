@@ -131,6 +131,17 @@ resolve_default_download_dir() {
 
   local desktop_en="$user_home/Desktop"
   local desktop_zh="$user_home/桌面"
+  if [[ "$user_home" == "/root" && ${EUID:-$(id -u)} -eq 0 ]]; then
+    if [[ -d "/home/15sir" ]]; then
+      user_home="/home/15sir"
+      desktop_en="$user_home/Desktop"
+      desktop_zh="$user_home/桌面"
+    elif [[ -d "/opt/PT-BDtool/bdtool-output" ]]; then
+      mkdir -p "/opt/PT-BDtool/bdtool-output/PT-BDtool"
+      printf "%s" "/opt/PT-BDtool/bdtool-output/PT-BDtool"
+      return 0
+    fi
+  fi
   local base_dir=""
   if [[ -d "$desktop_en" ]]; then
     base_dir="$desktop_en"

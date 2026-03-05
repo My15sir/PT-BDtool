@@ -374,7 +374,7 @@ finalize_disc_output() {
 collect_results() {
   local target="$1"
   local full="$2"
-  local p type normalized root
+  local p type normalized root tmp_candidates total processed pct last_pct
 
   normalize_scan_root() {
     local in="${1:-/}"
@@ -393,8 +393,25 @@ collect_results() {
   if [[ "$full" == "1" ]]; then
     root="$(normalize_scan_root "${BDTOOL_SCAN_FULL_ROOT:-/}")"
     screen "[INFO] 扫描中：全盘扫描（$root）"
+    screen "[INFO] 扫描进度: 0%"
+    tmp_candidates="$(mktemp)"
+    find "$root" \
+      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+    total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
+    processed=0
+    last_pct=0
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
+      processed=$((processed + 1))
+      if [[ "${total:-0}" -gt 0 ]]; then
+        pct=$((processed * 100 / total))
+        if [[ "$pct" -ge 100 ]]; then pct=100; fi
+        if (( pct >= last_pct + 10 || pct == 100 )); then
+          screen "[INFO] 扫描进度: ${pct}%"
+          last_pct="$pct"
+        fi
+      fi
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
         type="BDMV"
         normalized="$(dirname "$p")"
@@ -415,14 +432,30 @@ collect_results() {
         SCAN_TYPES+=("$type")
         SCAN_ITEMS+=("$normalized")
       fi
-    done < <(find "$root" \
-      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
+    done < "$tmp_candidates"
+    rm -f "$tmp_candidates"
   else
     root="$(normalize_scan_root "$target")"
     screen "[INFO] 扫描中：目录扫描（$root）"
+    screen "[INFO] 扫描进度: 0%"
+    tmp_candidates="$(mktemp)"
+    find "$root" \
+      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+    total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
+    processed=0
+    last_pct=0
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
+      processed=$((processed + 1))
+      if [[ "${total:-0}" -gt 0 ]]; then
+        pct=$((processed * 100 / total))
+        if [[ "$pct" -ge 100 ]]; then pct=100; fi
+        if (( pct >= last_pct + 10 || pct == 100 )); then
+          screen "[INFO] 扫描进度: ${pct}%"
+          last_pct="$pct"
+        fi
+      fi
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
         type="BDMV"
         normalized="$(dirname "$p")"
@@ -443,10 +476,10 @@ collect_results() {
         SCAN_TYPES+=("$type")
         SCAN_ITEMS+=("$normalized")
       fi
-    done < <(find "$root" \
-      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
+    done < "$tmp_candidates"
+    rm -f "$tmp_candidates"
   fi
+  screen "[INFO] 扫描进度: 100%"
   screen "[INFO] 扫描完成：共发现 ${#SCAN_ITEMS[@]} 个候选"
 }
 
@@ -589,17 +622,19 @@ download_item() {
   tar_path="$parent/$base.tar.gz"
 
   if command -v zip >/dev/null 2>&1; then
-    screen "[INFO] 打包中：$base.zip"
+    screen "[INFO] 打包进度: 0%"
+    screen "[INFO] 打包进度: 30%"
     (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
+    screen "[INFO] 打包进度: 100%"
     screen "$(msg downloaded)$zip_path"
-    screen "[INFO] 打包完成"
     return 0
   fi
 
-  screen "[INFO] 打包中：$base.tar.gz"
+  screen "[INFO] 打包进度: 0%"
+  screen "[INFO] 打包进度: 30%"
   tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
+  screen "[INFO] 打包进度: 100%"
   screen "$(msg downloaded)$tar_path"
-  screen "[INFO] 打包完成"
   return 0
 }
 
@@ -770,27 +805,18 @@ scan_menu() {
         esac
         ;;
       2)
-        retry=0
-        while (( retry < 3 )); do
-          read_line "$(msg dir_prompt): " p || return 0
-          if [[ -d "$p" && -r "$p" ]]; then
-            scan_flow "$p" "0"
-            [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
-            break
-          fi
-          retry=$((retry + 1))
-          if [[ "$p" != /* ]]; then
-            screen_error "$(msg dir_invalid)（请使用绝对路径，例如 /home/$USER/Downloads）"
-          elif [[ ! -e "$p" ]]; then
-            screen_error "$(msg dir_invalid)（路径不存在：$p；示例：/home/$USER/Downloads）"
-          elif [[ -f "$p" && -x "$p" ]]; then
-            screen_error "$(msg dir_exec_file)"
-          elif [[ ! -d "$p" ]]; then
-            screen_error "$(msg dir_invalid)（不是目录：$p；示例：/home/$USER/Downloads）"
-          else
-            screen_error "$(msg dir_invalid)（目录不可读：$p）"
-          fi
-        done
+        p="${BDTOOL_SCAN_DIR:-$PWD}"
+        if [[ -d "$p" && -r "$p" ]]; then
+          screen "[INFO] 扫描指定目录已自动使用：$p"
+          scan_flow "$p" "0"
+          [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
+        else
+          screen_error "$(msg dir_invalid)（自动目录不可读：$p）"
+        fi
+        ;;
+      /)
+        scan_flow "/" "1"
+        [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
         ;;
       0) return 0 ;;
       *) screen_error "$(msg invalid)" ;;
