@@ -78,6 +78,34 @@ resolve_data_dir() {
 
 resolve_effective_home() {
   local user_home="${HOME:-}"
+  local owner=""
+
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    if command -v getent >/dev/null 2>&1; then
+      owner="$(getent passwd "$SUDO_USER" | awk -F: '{print $6}' | head -n1)"
+    fi
+    [[ -z "$owner" ]] && owner="/home/$SUDO_USER"
+    [[ -n "$owner" ]] && { printf "%s" "$owner"; return 0; }
+  fi
+
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    local guessed_user=""
+    guessed_user="$(logname 2>/dev/null || true)"
+    if [[ -n "$guessed_user" && "$guessed_user" != "root" ]]; then
+      if command -v getent >/dev/null 2>&1; then
+        owner="$(getent passwd "$guessed_user" | awk -F: '{print $6}' | head -n1)"
+      fi
+      [[ -z "$owner" ]] && owner="/home/$guessed_user"
+      [[ -n "$owner" && -d "$owner" ]] && { printf "%s" "$owner"; return 0; }
+    fi
+
+    # Fallback to first regular user (UID>=1000) when available.
+    if command -v getent >/dev/null 2>&1; then
+      owner="$(getent passwd | awk -F: '$3>=1000 && $3<60000 && $1!="nobody"{print $6; exit}')"
+      [[ -n "$owner" && -d "$owner" ]] && { printf "%s" "$owner"; return 0; }
+    fi
+  fi
+
   if [[ -n "${SUDO_USER:-}" ]]; then
     local sudo_home=""
     if command -v getent >/dev/null 2>&1; then

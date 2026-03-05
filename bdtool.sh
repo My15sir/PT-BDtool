@@ -591,7 +591,7 @@ bt_process_local_scan() {
     export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
-    execute_with_spinner "处理视频 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
+    execute_with_spinner "处理媒体 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
     echo "DONE"
     return 0
   fi
@@ -616,7 +616,7 @@ bt_process_local_scan() {
   if [[ "$OPT_JOBS" -le 1 ]]; then
     local c
     for c in "${cmds[@]}"; do
-      execute_with_spinner "处理视频任务" bash -c "$c" || bt_die "处理失败：$scan_path"
+      execute_with_spinner "处理媒体任务" bash -c "$c" || bt_die "处理失败：$scan_path"
     done
   else
     execute_with_spinner "并行处理 ${#cmds[@]} 个视频任务" bt_run_with_jobs "$OPT_JOBS" "${cmds[@]}" || bt_die "并行处理失败：$scan_path"

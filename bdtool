@@ -346,7 +346,7 @@ make_disc_screenshots() {
     (( dur_int < 12 )) && dur_int=12
     for i in 1 2 3 4 5 6; do
       sec=$(( (dur_int * i) / 7 ))
-      ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1 || true
+      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1 || true
     done
   fi
   ensure_six_png "$out"
@@ -374,8 +374,16 @@ finalize_disc_output() {
 collect_results() {
   local target="$1"
   local full="$2"
-  local p type normalized
-  local full_root="${BDTOOL_SCAN_FULL_ROOT:-/}"
+  local p type normalized root
+
+  normalize_scan_root() {
+    local in="${1:-/}"
+    [[ -n "$in" ]] || in="/"
+    while [[ "$in" != "/" && "$in" == */ ]]; do
+      in="${in%/}"
+    done
+    printf "%s" "$in"
+  }
 
   SCAN_TYPES=()
   SCAN_ITEMS=()
@@ -383,7 +391,8 @@ collect_results() {
   declare -gA SCAN_SEEN=()
 
   if [[ "$full" == "1" ]]; then
-    dbg "full-scan root=$full_root"
+    root="$(normalize_scan_root "${BDTOOL_SCAN_FULL_ROOT:-/}")"
+    screen "[INFO] 扫描中：全盘扫描（$root）"
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
@@ -406,10 +415,12 @@ collect_results() {
         SCAN_TYPES+=("$type")
         SCAN_ITEMS+=("$normalized")
       fi
-    done < <(find "$full_root" -maxdepth 4 \
-      \( -path "$full_root/proc" -o -path "$full_root/proc/*" -o -path "$full_root/sys" -o -path "$full_root/sys/*" -o -path "$full_root/dev" -o -path "$full_root/dev/*" -o -path "$full_root/run" -o -path "$full_root/run/*" -o -path "$full_root/tmp" -o -path "$full_root/tmp/*" \) -prune -o \
+    done < <(find "$root" \
+      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
       \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   else
+    root="$(normalize_scan_root "$target")"
+    screen "[INFO] 扫描中：目录扫描（$root）"
     while IFS= read -r p; do
       [[ -n "$p" ]] || continue
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
@@ -432,10 +443,11 @@ collect_results() {
         SCAN_TYPES+=("$type")
         SCAN_ITEMS+=("$normalized")
       fi
-    done < <(find "$target" \
-      \( -path "$target/proc" -o -path "$target/proc/*" -o -path "$target/sys" -o -path "$target/sys/*" -o -path "$target/dev" -o -path "$target/dev/*" -o -path "$target/run" -o -path "$target/run/*" -o -path "$target/tmp" -o -path "$target/tmp/*" \) -prune -o \
+    done < <(find "$root" \
+      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
       \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null)
   fi
+  screen "[INFO] 扫描完成：共发现 ${#SCAN_ITEMS[@]} 个候选"
 }
 
 show_results() {
@@ -482,6 +494,7 @@ generate_item() {
   }
   dbg "output root=$BDTOOL_SOURCE_INFO_ROOT dir=$out type=$type src=$src"
   mkdir -p "$out"
+  screen "[INFO] 生成中：$src"
 
   if [[ "$type" == "VIDEO" ]]; then
     if require_runtime_cmd mediainfo; then
@@ -502,7 +515,7 @@ generate_item() {
       (( dur_int < 12 )) && dur_int=12
       for i in 1 2 3 4 5 6; do
         sec=$(( (dur_int * i) / 7 ))
-        if ! ffmpeg -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1; then
+        if ! ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1; then
           has_error=1
         fi
       done
@@ -552,6 +565,7 @@ generate_item() {
   fi
 
   if [[ "$has_error" -eq 0 ]]; then
+    screen "[INFO] 生成完成"
     screen "$(msg gen_done)$out"
     screen "$(msg op_ok)"
   else
@@ -575,13 +589,17 @@ download_item() {
   tar_path="$parent/$base.tar.gz"
 
   if command -v zip >/dev/null 2>&1; then
+    screen "[INFO] 打包中：$base.zip"
     (cd "$src_parent" && zip -qr "$zip_path" "$base") || return 1
     screen "$(msg downloaded)$zip_path"
+    screen "[INFO] 打包完成"
     return 0
   fi
 
+  screen "[INFO] 打包中：$base.tar.gz"
   tar -czf "$tar_path" -C "$src_parent" "$base" || return 1
   screen "$(msg downloaded)$tar_path"
+  screen "[INFO] 打包完成"
   return 0
 }
 
@@ -737,13 +755,19 @@ scan_menu() {
         read_line "$(msg scan_confirm): " c || return 0
         c="$(echo "$c" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
         dbg "full-scan confirm input='$c'"
-        if [[ "$c" == "1" || "${c,,}" == "y" || "${c,,}" == "yes" ]]; then
-          dbg "full-scan confirmed -> entering scan_flow"
-          scan_flow "/" "1"
-          [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
-        else
-          dbg "full-scan canceled -> back to scan menu"
-        fi
+        case "${c,,}" in
+          1|y|yes)
+            dbg "full-scan confirmed -> entering scan_flow"
+            scan_flow "/" "1"
+            [[ "$BDTOOL_EXIT_REQUESTED" == "1" ]] && return 0
+            ;;
+          2|n|no|q|quit|exit|"\\"|"")
+            dbg "full-scan canceled -> back to scan menu"
+            ;;
+          *)
+            screen_error "$(msg invalid)"
+            ;;
+        esac
         ;;
       2)
         retry=0
@@ -866,7 +890,6 @@ main() {
   main_menu
 }
 
-main "$@"
 require_runtime_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 && return 0
@@ -879,3 +902,5 @@ require_runtime_cmd() {
   screen_error "请先执行：bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh，然后重新安装离线包。"
   return 1
 }
+
+main "$@"

@@ -26,6 +26,8 @@ export PATH="$HOME/.local/bin:$PATH"
 pt
 ```
 
+说明：`pt` 会自动识别音频/视频/原盘输入并进入对应流程。
+
 ## 复制以下命令卸载
 ```bash
 set -euo pipefail

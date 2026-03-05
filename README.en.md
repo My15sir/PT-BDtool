@@ -26,6 +26,8 @@ export PATH="$HOME/.local/bin:$PATH"
 pt
 ```
 
+Note: `pt` auto-detects audio/video/disc input types.
+
 ## Copy This To Uninstall
 ```bash
 set -euo pipefail
