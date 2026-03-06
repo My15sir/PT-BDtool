@@ -85,7 +85,7 @@ setup_bundle_runtime "$ROOT_DIR"
 : "${BDTOOL_DEBUG:=0}"
 
 ensure_output_root
-MAX_SCAN_DISPLAY=5
+MAX_SCAN_DISPLAY=10
 BDTOOL_EXIT_REQUESTED=0
 
 on_err() {
@@ -128,7 +128,7 @@ msg() {
       none_hint) echo "Supported scan targets: video/audio files (*.mkv/*.mp4/*.mp3/... ), *.iso, or BDMV folders." ;;
       dir_exec_file) echo "You entered an executable file path. Please enter a directory containing media files, e.g. /home/$USER/Downloads." ;;
       limit) echo "Only first 5 shown, others omitted" ;;
-      pick) echo "Input index/indexes (e.g. 1 or 1 2 3, 0 back)" ;;
+      pick) echo "Input command/indexes (n/p/g N for pages, indexes like 12 19 33, 0 back, r rescan)" ;;
       pick_limit) echo "Too many invalid attempts" ;;
       gen_done) echo "Generated: " ;;
       post_title) echo "Post process" ;;
@@ -171,7 +171,7 @@ msg() {
       none_hint) echo "可扫描类型：视频/音频文件（*.mkv/*.mp4/*.mp3 等）、ISO 文件（*.iso）、BDMV 目录。" ;;
       dir_exec_file) echo "你输入的是可执行文件路径，请输入包含媒体文件的目录，例如 /home/$USER/Downloads。" ;;
       limit) echo "仅显示前5条，其余已省略" ;;
-      pick) echo "请输入序号（如 1 或 1 2 3，0 返回）" ;;
+      pick) echo "请输入指令/序号（n下一页 p上一页 g 页码；可多选如 12 19 33；0 返回；r 重扫）" ;;
       pick_limit) echo "输入错误过多，已返回" ;;
       gen_done) echo "生成完成：" ;;
       post_title) echo "结果处理" ;;
@@ -492,9 +492,34 @@ collect_results() {
   screen "扫描完成：共发现 ${#SCAN_ITEMS[@]} 个候选"
 }
 
-show_results() {
+show_result_item() {
+  local idx="$1"
+  local label=""
+  case "${SCAN_TYPES[idx-1]}" in
+    VIDEO) label="$(msg type_video)" ;;
+    AUDIO) label="$(msg type_audio)" ;;
+    BDMV) label="$(msg type_bdmv)" ;;
+    ISO) label="$(msg type_iso)" ;;
+    *) label="${SCAN_TYPES[idx-1]}" ;;
+  esac
+  printf "%d) [%s] %s\n" "$idx" "$label" "${SCAN_ITEMS[idx-1]}"
+}
+
+scan_total_pages() {
   local total="${#SCAN_ITEMS[@]}"
-  local show_n i label
+  local page_size="$1"
+  if (( total <= 0 )); then
+    printf "0"
+    return 0
+  fi
+  printf "%d" $(( (total + page_size - 1) / page_size ))
+}
+
+show_results_page() {
+  local page="$1"
+  local page_size="$2"
+  local total="${#SCAN_ITEMS[@]}"
+  local total_pages start_idx end_idx i
 
   if (( total == 0 )); then
     screen "$(msg none)"
@@ -502,20 +527,32 @@ show_results() {
     return 1
   fi
 
-  show_n=$(( total > MAX_SCAN_DISPLAY ? MAX_SCAN_DISPLAY : total ))
-  for ((i=1; i<=show_n; i++)); do
-    case "${SCAN_TYPES[i-1]}" in
-      VIDEO) label="$(msg type_video)" ;;
-      AUDIO) label="$(msg type_audio)" ;;
-      BDMV) label="$(msg type_bdmv)" ;;
-      ISO) label="$(msg type_iso)" ;;
-      *) label="${SCAN_TYPES[i-1]}" ;;
-    esac
-    printf "%d) [%s] %s\n" "$i" "$label" "${SCAN_ITEMS[i-1]}"
-  done
-  if (( total > MAX_SCAN_DISPLAY )); then
-    screen "$(msg limit)"
+  total_pages="$(scan_total_pages "$page_size")"
+  (( page < 1 )) && page=1
+  (( page > total_pages )) && page="$total_pages"
+  start_idx=$(( (page - 1) * page_size + 1 ))
+  end_idx=$(( start_idx + page_size - 1 ))
+  (( end_idx > total )) && end_idx="$total"
+
+  if [[ "$LANG_CODE" == "en" ]]; then
+    screen "Candidates: page ${page}/${total_pages}, items ${start_idx}-${end_idx} / ${total}"
+    if (( total_pages > 1 )); then
+      screen "Browse: n=next page, p=prev page, g N=go page"
+    fi
+    screen "Select by global index, supports multi-select: e.g. 12 19 33"
+    screen "Input r to rescan, 0 to back"
+  else
+    screen "候选列表：第 ${page}/${total_pages} 页，条目 ${start_idx}-${end_idx} / ${total}"
+    if (( total_pages > 1 )); then
+      screen "浏览命令：n 下一页，p 上一页，g 页码（如 g 3）"
+    fi
+    screen "可按全局序号选择，支持多选：如 12 19 33"
+    screen "输入 r 重新扫描，输入 0 返回"
   fi
+
+  for ((i=start_idx; i<=end_idx; i++)); do
+    show_result_item "$i"
+  done
   return 0
 }
 
@@ -829,6 +866,7 @@ post_process_item() {
 handle_multi_select() {
   local raw="$1"
   local tokens t idx
+  local total="${#SCAN_ITEMS[@]}"
   local -A seen=()
   local -a selected=()
 
@@ -840,7 +878,7 @@ handle_multi_select() {
   for t in "${tokens[@]}"; do
     [[ "$t" =~ ^[0-9]+$ ]] || return 2
     idx="$t"
-    if (( idx <= 0 || idx > MAX_SCAN_DISPLAY || idx > ${#SCAN_ITEMS[@]} )); then
+    if (( idx <= 0 || idx > total )); then
       return 2
     fi
     if [[ -z "${seen[$idx]:-}" ]]; then
@@ -875,14 +913,79 @@ handle_multi_select() {
 scan_flow() {
   local target="$1"
   local full="$2"
-  local pick retries rc
+  local pick rc
+  local page_size=0
+  local current_page=1
+  local total_pages=1
+  local number_part=""
 
   collect_results "$target" "$full"
-  show_results || return 0
+  if (( ${#SCAN_ITEMS[@]} == 0 )); then
+    screen "$(msg none)"
+    screen "$(msg none_hint)"
+    return 0
+  fi
 
-  retries=0
-  while (( retries < 3 )); do
+  page_size="${BDTOOL_PAGE_SIZE:-$MAX_SCAN_DISPLAY}"
+  [[ "$page_size" =~ ^[0-9]+$ ]] || page_size="$MAX_SCAN_DISPLAY"
+  (( page_size < 1 )) && page_size="$MAX_SCAN_DISPLAY"
+
+  while true; do
+    total_pages="$(scan_total_pages "$page_size")"
+    (( current_page < 1 )) && current_page=1
+    (( current_page > total_pages )) && current_page="$total_pages"
+    show_results_page "$current_page" "$page_size" || return 0
+
     read_line "$(msg pick): " pick || return 0
+    pick="${pick#"${pick%%[![:space:]]*}"}"
+    pick="${pick%"${pick##*[![:space:]]}"}"
+
+    [[ -z "$pick" ]] && continue
+    case "$pick" in
+      0)
+        return 0
+        ;;
+      r|R)
+        collect_results "$target" "$full"
+        if (( ${#SCAN_ITEMS[@]} == 0 )); then
+          screen "$(msg none)"
+          screen "$(msg none_hint)"
+          return 0
+        fi
+        current_page=1
+        continue
+        ;;
+      n|N)
+        if (( current_page < total_pages )); then
+          current_page=$((current_page + 1))
+        else
+          screen_error "$(msg invalid)"
+        fi
+        continue
+        ;;
+      p|P)
+        if (( current_page > 1 )); then
+          current_page=$((current_page - 1))
+        else
+          screen_error "$(msg invalid)"
+        fi
+        continue
+        ;;
+      g\ *|G\ *)
+        number_part="$(echo "$pick" | sed -E 's/^[gG][[:space:]]*//')"
+        if [[ "$number_part" =~ ^[0-9]+$ ]] && (( number_part >= 1 && number_part <= total_pages )); then
+          current_page="$number_part"
+        else
+          screen_error "$(msg invalid)"
+        fi
+        continue
+        ;;
+      g|G)
+        screen_error "$(msg invalid)"
+        continue
+        ;;
+    esac
+
     if handle_multi_select "$pick"; then
       rc=0
     else
@@ -895,12 +998,8 @@ scan_flow() {
     if [[ "$rc" -eq 3 ]]; then
       return 0
     fi
-    retries=$((retries + 1))
     screen_error "$(msg invalid)"
   done
-
-  screen "$(msg pick_limit)"
-  return 0
 }
 
 scan_menu() {
