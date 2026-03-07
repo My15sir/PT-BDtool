@@ -1,48 +1,129 @@
 # PT-BDtool
 
-This project is AI-generated.
-No feedback is accepted.
-Please troubleshoot issues by yourself.
+PT-BDtool is a media info packaging tool.
 
-## Copy This To Install
+It can process:
+- video files
+- audio files
+- Blu-ray `BDMV` folders
+- Blu-ray `ISO` images
+
+After processing, it generates a ready-to-use info package, for example:
+- Video: `mediainfo.txt` + `1.png` to `6.png`
+- Audio: `mediainfo.txt` + `频谱图.png`
+- Disc/ISO: `BDInfo.txt` + `1.png` to `6.png`
+
+If you only want the quickest way to use it, start with **3-minute quick start** below.
+
+## 3-Minute Quick Start
+
+### Step 1: Install
+Run this inside the project directory:
+
 ```bash
-set -euo pipefail
-cd ~
-if [ -d PT-BDtool/.git ]; then
-  cd PT-BDtool && git pull --ff-only
-else
-  git clone https://github.com/My15sir/PT-BDtool.git
-  cd PT-BDtool
-fi
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+Check that installation worked:
+
+```bash
 pt --help
 ```
 
-## Copy This To Start
+### Step 2: Start
+The simplest way:
+
 ```bash
-set -euo pipefail
+pt
+```
+
+### Step 3: Follow the menu
+Inside the menu:
+
+1. Type `1` to start scanning
+2. Wait for scan to finish
+3. Enter the item number you want to process
+4. Wait for generation and packaging
+5. Go to the shown output path and get your package
+
+## The 3 Most Common Ways To Use It
+
+### Option 1: Use it on your local machine
+If you run it on your own computer:
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 pt
 ```
 
-Note: `pt` auto-detects audio/video/disc input types.
-Interaction notes:
-- Selecting `Scan` in main menu directly starts default full scan (auto-excludes `/proc /sys /dev /run`).
-- Input `/` is still supported as a scan shortcut.
-- Scan and package-download stages show percent progress up to `100%`.
-- Leave download path empty to use the real user desktop (`~/Desktop/PT-BDtool`).
-- After item generation, download runs automatically, then cleanup runs automatically.
+The result is saved to your desktop by default.
 
-## VPS Auto Return To Local
-The project now exposes a first-class return mode via `BDTOOL_RETURN_MODE`:
+### Option 2: Use it on a VPS and keep the result on the VPS
+This is the simplest and most reliable VPS workflow:
 
-- `local`: default; save package locally. In SSH/VPS sessions the default path becomes `~/PT-BDtool-downloads`
-- `http`: upload the package to your HTTP receiver with `PUT`
-- `scp`: send the package back with `scp`
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
+pt
+```
 
-### Option 1: HTTP return
-Recommended when using a reverse tunnel from your local machine:
+After processing, the package will be stored in:
+
+```bash
+$HOME/PT-BDtool-downloads
+```
+
+Then download it from your local machine:
+
+```bash
+scp user@your-vps-ip:$HOME/PT-BDtool-downloads/*.zip .
+```
+
+If zip is not available, the file may be `tar.gz` instead.
+
+### Option 3: Skip the menu and process one file directly
+If you already know the file path, direct CLI is easier:
+
+```bash
+bdtool /path/to/movie.mp4 --out /path/to/output
+```
+
+Example:
+
+```bash
+bdtool ~/Videos/test.mp4 --out ~/PT-output
+```
+
+## Best Practice For VPS Users
+
+If you are on a VPS, this is the recommended starting point:
+
+```bash
+bash install.sh --offline
+export PATH="$HOME/.local/bin:$PATH"
+export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
+pt
+```
+
+Why this is recommended:
+- no desktop environment required
+- no auto-return setup required
+- fewer moving parts
+- easier troubleshooting
+
+## If You Want Automatic Return To Your Local Machine
+
+This is an advanced feature, but it is now officially supported.
+
+Use `BDTOOL_RETURN_MODE` to choose the mode:
+
+- `local`: save on the current machine
+- `http`: upload automatically to your HTTP receiver
+- `scp`: send back automatically with `scp`
+
+### Option A: HTTP auto-return
+Best if you already have a receiver or use a reverse tunnel.
 
 ```bash
 export BDTOOL_RETURN_MODE=http
@@ -50,10 +131,14 @@ export BDTOOL_RETURN_HTTP_URL='http://127.0.0.1:18080/upload'
 pt
 ```
 
-Legacy compatibility: `BDTOOL_CLIENT_UPLOAD_URL` still works.
+Legacy variable still supported:
 
-### Option 2: SCP return
-SSH key auth is recommended:
+```bash
+BDTOOL_CLIENT_UPLOAD_URL
+```
+
+### Option B: SCP auto-return
+SSH key authentication is recommended.
 
 ```bash
 export BDTOOL_RETURN_MODE=scp
@@ -65,15 +150,101 @@ export BDTOOL_RETURN_SCP_IDENTITY_FILE="$HOME/.ssh/id_ed25519"
 pt
 ```
 
-Optional variables:
-- `BDTOOL_RETURN_SCP_PASSWORD`: if password auth is unavoidable, the program will try `sshpass -e`; not recommended
-- `BDTOOL_RETURN_SCP_STRICT_HOST_KEY_CHECKING`: defaults to `accept-new`
+Optional:
+- `BDTOOL_RETURN_SCP_PASSWORD`: only if password auth is unavoidable; the tool will try `sshpass -e`
+- `BDTOOL_RETURN_SCP_STRICT_HOST_KEY_CHECKING`: default is `accept-new`
 
 Notes:
-- If the VPS cannot reach your local machine directly, create a reverse tunnel first and point `HOST/PORT` to that tunnel
-- Without a return mode, SSH/VPS sessions save the package locally on the VPS under `~/PT-BDtool-downloads`
+- If the VPS cannot reach your local machine directly, create a reverse tunnel first
+- If you are not sure how to configure this, use the “save on VPS first” workflow above
 
-## Copy This To Uninstall
+## Useful Commands
+
+### Show help
+```bash
+bdtool --help
+```
+
+### Check dependencies
+```bash
+bdtool doctor
+```
+
+### Check install status
+```bash
+bdtool status
+```
+
+### Clean output directory
+```bash
+bdtool clean
+```
+
+## Direct CLI Examples
+
+### Process one video
+```bash
+bdtool /data/movie.mkv --out /data/output
+```
+
+### Process one audio file
+```bash
+bdtool /data/song.flac --out /data/output
+```
+
+### Process a whole directory
+```bash
+bdtool /data/media-dir --out /data/output
+```
+
+### Dry run only
+```bash
+bdtool /data/movie.mkv --mode dry --out /data/output
+```
+
+### Enable debug logs
+```bash
+bdtool /data/movie.mkv --log-level debug --out /data/output
+```
+
+## What The Menu Does
+
+When you run `pt`, it generally does this:
+
+1. scan media files
+2. list candidates
+3. let you choose an item
+4. generate info files and screenshots
+5. package the result
+6. save locally or return automatically
+7. clean temporary generated files by default
+
+## What You Usually Get
+
+### Video
+- `mediainfo.txt`
+- `1.png`
+- `2.png`
+- `3.png`
+- `4.png`
+- `5.png`
+- `6.png`
+
+### Audio
+- `mediainfo.txt`
+- `频谱图.png`
+
+### Disc / ISO
+- `BDInfo.txt`
+- `1.png`
+- `2.png`
+- `3.png`
+- `4.png`
+- `5.png`
+- `6.png`
+
+## Uninstall
+
 ```bash
 set -euo pipefail
 rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/pt" "$HOME/.local/bin/pts"
