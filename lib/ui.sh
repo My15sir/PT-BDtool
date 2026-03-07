@@ -129,6 +129,16 @@ resolve_default_download_dir() {
   local user_home=""
   user_home="$(resolve_effective_home)" || return 1
 
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    local remote_target="$user_home/PT-BDtool-downloads"
+    mkdir -p "$remote_target"
+    local remote_probe="$remote_target/.bdtool_write_probe.$$"
+    : > "$remote_probe" || return 1
+    rm -f "$remote_probe"
+    printf "%s" "$remote_target"
+    return 0
+  fi
+
   local desktop_xdg=""
   local desktop_en="$user_home/Desktop"
   local desktop_zh="$user_home/桌面"
@@ -218,11 +228,33 @@ system_media_runtime_healthy() {
 }
 
 is_client_upload_mode() {
-  [[ -n "${BDTOOL_CLIENT_UPLOAD_URL:-}" ]]
+  [[ "$(detect_return_mode)" == "http" ]]
+}
+
+is_scp_return_mode() {
+  [[ "$(detect_return_mode)" == "scp" ]]
+}
+
+detect_return_mode() {
+  local mode="${BDTOOL_RETURN_MODE:-}"
+  if [[ -z "$mode" ]]; then
+    if [[ -n "${BDTOOL_RETURN_SCP_HOST:-}" || -n "${BDTOOL_RETURN_SCP_REMOTE_DIR:-}" || -n "${BDTOOL_RETURN_SCP_USER:-}" ]]; then
+      mode="scp"
+    elif [[ -n "${BDTOOL_RETURN_HTTP_URL:-}" || -n "${BDTOOL_CLIENT_UPLOAD_URL:-}" ]]; then
+      mode="http"
+    else
+      mode="local"
+    fi
+  fi
+  case "$mode" in
+    local|http|scp) ;;
+    *) return 1 ;;
+  esac
+  printf "%s" "$mode"
 }
 
 build_client_upload_url() {
-  local upload_url="${BDTOOL_CLIENT_UPLOAD_URL:-}"
+  local upload_url="${BDTOOL_RETURN_HTTP_URL:-${BDTOOL_CLIENT_UPLOAD_URL:-}}"
   local filename="${1:-}"
   local encoded_name=""
   [[ -n "$upload_url" && -n "$filename" ]] || return 1
@@ -285,6 +317,100 @@ upload_artifact_to_client() {
     return 1
   fi
   printf "%s" "$upload_resp"
+  return 0
+}
+
+ptbd_quote_posix() {
+  local raw="${1:-}"
+  printf "'%s'" "$(printf "%s" "$raw" | sed "s/'/'\\\\''/g")"
+}
+
+scp_return_target() {
+  local filename="${1:-}"
+  local host="${BDTOOL_RETURN_SCP_HOST:-}"
+  local user="${BDTOOL_RETURN_SCP_USER:-}"
+  local remote_dir="${BDTOOL_RETURN_SCP_REMOTE_DIR:-}"
+  [[ -n "$host" && -n "$user" && -n "$remote_dir" && -n "$filename" ]] || return 1
+  printf "%s@%s:%s" "$user" "$host" "$(ptbd_quote_posix "$remote_dir/$filename")"
+}
+
+run_scp_transport() {
+  local tool="$1"
+  shift
+  local port="${BDTOOL_RETURN_SCP_PORT:-22}"
+  local strict="${BDTOOL_RETURN_SCP_STRICT_HOST_KEY_CHECKING:-accept-new}"
+  local identity="${BDTOOL_RETURN_SCP_IDENTITY_FILE:-}"
+  local password="${BDTOOL_RETURN_SCP_PASSWORD:-}"
+  local -a transport_cmd=("$tool")
+
+  case "$tool" in
+    ssh)
+      transport_cmd+=("-p" "$port" "-o" "StrictHostKeyChecking=$strict")
+      ;;
+    scp)
+      transport_cmd+=("-P" "$port" "-o" "StrictHostKeyChecking=$strict")
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [[ -n "$identity" ]]; then
+    transport_cmd+=("-i" "$identity")
+  fi
+
+  if [[ -n "$password" ]]; then
+    command -v sshpass >/dev/null 2>&1 || {
+      log_err "SCP 回传失败：已设置 BDTOOL_RETURN_SCP_PASSWORD，但系统缺少 sshpass"
+      return 1
+    }
+    SSHPASS="$password" sshpass -e "${transport_cmd[@]}" "$@"
+    return $?
+  fi
+
+  "${transport_cmd[@]}" "$@"
+}
+
+prepare_scp_return_path() {
+  local host="${BDTOOL_RETURN_SCP_HOST:-}"
+  local user="${BDTOOL_RETURN_SCP_USER:-}"
+  local remote_dir="${BDTOOL_RETURN_SCP_REMOTE_DIR:-}"
+  [[ -n "$host" && -n "$user" && -n "$remote_dir" ]] || return 1
+  run_scp_transport ssh "$user@$host" "mkdir -p -- $(ptbd_quote_posix "$remote_dir")"
+}
+
+upload_artifact_via_scp() {
+  local artifact_file="${1:-}"
+  local target=""
+  local elapsed_s=0
+  local scp_pid=0
+  [[ -f "$artifact_file" ]] || return 1
+  is_scp_return_mode || return 1
+  command -v ssh >/dev/null 2>&1 || {
+    log_err "SCP 回传失败：缺少 ssh"
+    return 1
+  }
+  command -v scp >/dev/null 2>&1 || {
+    log_err "SCP 回传失败：缺少 scp"
+    return 1
+  }
+  prepare_scp_return_path || {
+    log_err "SCP 回传失败：无法创建远端目录"
+    return 1
+  }
+  target="$(scp_return_target "$(basename "$artifact_file")")" || return 1
+  run_scp_transport scp "$artifact_file" "$target" &
+  scp_pid=$!
+  while kill -0 "$scp_pid" 2>/dev/null; do
+    sleep 2
+    elapsed_s=$((elapsed_s + 2))
+    log_info "SCP 回传进行中（${elapsed_s}s）"
+  done
+  wait "$scp_pid" || {
+    log_err "SCP 回传失败：$target"
+    return 1
+  }
+  printf "%s" "${BDTOOL_RETURN_SCP_REMOTE_DIR:-}/$(basename "$artifact_file")"
   return 0
 }
 

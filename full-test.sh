@@ -10,6 +10,12 @@ TMP_FULL_LOG="$ROOT_DIR/.full-test.log.tmp"
 TMP_RESULTS_TSV="$ROOT_DIR/.full-test-results.tsv.tmp"
 TMPDIR_ROOT="$ROOT_DIR/.tmp"
 TEST_DOWNLOAD_DIR="$ROOT_DIR/bdtool-output/test-downloads"
+SSH_TEST_HOME="$ROOT_DIR/.full-test-ssh-home"
+SSH_TEST_DOWNLOAD_DIR="$SSH_TEST_HOME/PT-BDtool-downloads"
+SCP_TEST_HOME="$ROOT_DIR/.full-test-scp-home"
+SCP_TEST_ROOT="$ROOT_DIR/.full-test-return-scp"
+SCP_TEST_REMOTE_DIR="$SCP_TEST_ROOT/local-target"
+SCP_TEST_BIN="$SCP_TEST_ROOT/mock-bin"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$TMPDIR_ROOT" "$TEST_DOWNLOAD_DIR"
@@ -18,7 +24,7 @@ touch "$RUN_LOG" "$FULL_LOG"
 : > "$TMP_RESULTS_TSV"
 
 : > "$RESULTS_TSV"
-rm -rf "$TEST_DOWNLOAD_DIR"/*
+find "${TEST_DOWNLOAD_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 
 TIMEOUT_SECONDS="${BDTOOL_CMD_TIMEOUT:-300}"
 CLI_BIN="${BDTOOL_TEST_BIN:-}"
@@ -31,6 +37,12 @@ PATHRULE_SAMPLE="$PATHRULE_SRC_DIR/movie.mp4"
 FULLSCAN_ROOT="$ROOT_DIR/.full-test-fullscan"
 FULLSCAN_SRC_DIR="$FULLSCAN_ROOT/subdir"
 FULLSCAN_SAMPLE="$FULLSCAN_SRC_DIR/fullscan.mp4"
+FULLSCAN_SSH_ROOT="$ROOT_DIR/.full-test-fullscan-ssh"
+FULLSCAN_SSH_SRC_DIR="$FULLSCAN_SSH_ROOT/subdir"
+FULLSCAN_SSH_SAMPLE="$FULLSCAN_SSH_SRC_DIR/fullscan.mp4"
+FULLSCAN_SCP_ROOT="$ROOT_DIR/.full-test-fullscan-scp"
+FULLSCAN_SCP_SRC_DIR="$FULLSCAN_SCP_ROOT/subdir"
+FULLSCAN_SCP_SAMPLE="$FULLSCAN_SCP_SRC_DIR/fullscan.mp4"
 
 if [[ -z "$CLI_BIN" ]]; then
   if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
@@ -46,9 +58,55 @@ fi
 # Minimal sample for dry-mode execution path validation.
 : > "$NOEMPTY_SAMPLE"
 rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT"
-mkdir -p "$PATHRULE_SRC_DIR" "$FULLSCAN_SRC_DIR"
+rm -rf "$FULLSCAN_SSH_ROOT" "$SSH_TEST_HOME" "$FULLSCAN_SCP_ROOT" "$SCP_TEST_ROOT" "$SCP_TEST_HOME"
+mkdir -p "$PATHRULE_SRC_DIR" "$FULLSCAN_SRC_DIR" "$FULLSCAN_SSH_SRC_DIR" "$FULLSCAN_SCP_SRC_DIR" "$SCP_TEST_BIN" "$SCP_TEST_REMOTE_DIR"
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$PATHRULE_SAMPLE" -y
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SAMPLE" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SSH_SAMPLE" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SCP_SAMPLE" -y
+
+cat > "$SCP_TEST_BIN/ssh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+last_arg="${@: -1}"
+remote_dir="$(printf '%s' "$last_arg" | sed -n "s/^mkdir -p -- '\\(.*\\)'$/\\1/p" | sed "s/'\\\\''/'/g")"
+[[ -n "$remote_dir" ]] || exit 1
+mkdir -p "$remote_dir"
+SH
+chmod +x "$SCP_TEST_BIN/ssh"
+
+cat > "$SCP_TEST_BIN/scp" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+src=""
+dst=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -P|-i|-o)
+      shift 2
+      ;;
+    -*)
+      shift 1
+      ;;
+    *)
+      if [[ -z "$src" ]]; then
+        src="$1"
+      elif [[ -z "$dst" ]]; then
+        dst="$1"
+      fi
+      shift 1
+      ;;
+  esac
+done
+[[ -n "$src" && -n "$dst" ]] || exit 1
+dst="${dst#*:}"
+dst="${dst#\'}"
+dst="${dst%\'}"
+dst="$(printf '%s' "$dst" | sed "s/'\\\\''/'/g")"
+mkdir -p "$(dirname "$dst")"
+cp -f "$src" "$dst"
+SH
+chmod +x "$SCP_TEST_BIN/scp"
 
 write_log() {
   mkdir -p "$LOG_DIR"
@@ -139,6 +197,8 @@ run_step "scan-dry-invalid-input" fail "$CLI_BIN" "$ROOT_DIR/bdtool.sh" --mode d
 run_step "bdtool-dry-noempty" success "$MENU_BIN" "$NOEMPTY_SAMPLE" --mode dry --out "$NOEMPTY_OUT"
 run_step "default-out-pathrule-video" success "$CLI_BIN" "$PATHRULE_SAMPLE" --log-level debug
 run_step "fullscan-confirm-enters-flow" success env TMPDIR="$TMPDIR_ROOT" BDTOOL_DOWNLOAD_DIR="$TEST_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_ROOT" bash -c "printf '1\n1\n1\n1\n0\n0\n3\n' | '$MENU_BIN'"
+run_step "fullscan-ssh-fallback-download" success env -u BDTOOL_DOWNLOAD_DIR HOME="$SSH_TEST_HOME" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SSH_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
+run_step "fullscan-scp-return" success env HOME="$SCP_TEST_HOME" PATH="$SCP_TEST_BIN:$PATH" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_RETURN_MODE="scp" BDTOOL_RETURN_SCP_HOST="127.0.0.1" BDTOOL_RETURN_SCP_USER="receiver" BDTOOL_RETURN_SCP_REMOTE_DIR="$SCP_TEST_REMOTE_DIR" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SCP_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
 
 if ! find "$NOEMPTY_OUT" -type f -name 'README.txt' 2>/dev/null | grep -q .; then
   write_log "FULL TEST RESULT: FAIL (no output artifact for bdtool-dry-noempty)"
@@ -160,6 +220,16 @@ if ! find "$FULLSCAN_ROOT/信息/subdir" -type f -name 'mediainfo.txt' 2>/dev/nu
   exit 1
 fi
 
+if [[ ! -f "$SSH_TEST_DOWNLOAD_DIR/subdir.zip" && ! -f "$SSH_TEST_DOWNLOAD_DIR/subdir.tar.gz" ]]; then
+  write_log "FULL TEST RESULT: FAIL (ssh session did not fallback to VPS local download dir)"
+  exit 1
+fi
+
+if [[ ! -f "$SCP_TEST_REMOTE_DIR/subdir.zip" && ! -f "$SCP_TEST_REMOTE_DIR/subdir.tar.gz" ]]; then
+  write_log "FULL TEST RESULT: FAIL (scp return mode did not upload package to remote dir)"
+  exit 1
+fi
+
 run_step "clean" success "$CLI_BIN" clean
 run_step "bad-args" fail "$CLI_BIN" unknown-command
 
@@ -174,4 +244,4 @@ fi
 
 write_log "FULL TEST RESULT: PASS"
 rm -f "$NOEMPTY_SAMPLE"
-rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT"
+rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT" "$FULLSCAN_SSH_ROOT" "$SSH_TEST_HOME" "$FULLSCAN_SCP_ROOT" "$SCP_TEST_ROOT" "$SCP_TEST_HOME"

@@ -564,22 +564,36 @@ show_results_page() {
 
 preflight_post_process() {
   local resolved_default_dir=""
-  if is_client_upload_mode; then
+  local return_mode=""
+  return_mode="$(detect_return_mode)" || {
+    screen_error "步骤失败：BDTOOL_RETURN_MODE 无效（可选: local/http/scp）"
+    return 1
+  }
+
+  if [[ "$return_mode" == "http" ]]; then
     if ! command -v curl >/dev/null 2>&1; then
-      screen_error "步骤失败：已启用客户端下载通道但系统缺少 curl"
+      screen_error "步骤失败：已启用 HTTP 回传但系统缺少 curl"
       return 1
     fi
     if ! build_client_upload_url "ptbd-preflight.bin" >/dev/null 2>&1; then
-      screen_error "步骤失败：BDTOOL_CLIENT_UPLOAD_URL 无法解析"
+      screen_error "步骤失败：HTTP 回传地址无效（请设置 BDTOOL_RETURN_HTTP_URL 或兼容变量 BDTOOL_CLIENT_UPLOAD_URL）"
       return 1
     fi
-    dbg "preflight mode=client-upload"
+    dbg "preflight mode=http-return"
     return 0
   fi
 
-  if [[ -n "${SSH_CONNECTION:-}" && -z "${BDTOOL_DOWNLOAD_DIR:-}" ]]; then
-    screen_error "步骤失败：远程会话未配置客户端下载通道（请设置 BDTOOL_CLIENT_UPLOAD_URL）"
-    return 1
+  if [[ "$return_mode" == "scp" ]]; then
+    if ! command -v ssh >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then
+      screen_error "步骤失败：已启用 SCP 回传，但系统缺少 ssh/scp"
+      return 1
+    fi
+    if [[ -z "${BDTOOL_RETURN_SCP_HOST:-}" || -z "${BDTOOL_RETURN_SCP_USER:-}" || -z "${BDTOOL_RETURN_SCP_REMOTE_DIR:-}" ]]; then
+      screen_error "步骤失败：SCP 回传缺少必要参数（需要 BDTOOL_RETURN_SCP_HOST / BDTOOL_RETURN_SCP_USER / BDTOOL_RETURN_SCP_REMOTE_DIR）"
+      return 1
+    fi
+    dbg "preflight mode=scp-return"
+    return 0
   fi
 
   resolved_default_dir="$(resolve_default_download_dir)" || {
@@ -737,10 +751,10 @@ download_item() {
   local base src_parent zip_path tar_path final_pkg=""
   local client_upload_path=""
   local package_dir=""
-  local client_mode=0
+  local return_mode="local"
   src_parent="$(dirname "$out")"
-  if is_client_upload_mode; then
-    client_mode=1
+  return_mode="$(detect_return_mode)" || return 1
+  if [[ "$return_mode" == "http" || "$return_mode" == "scp" ]]; then
     package_dir="${BDTOOL_CLIENT_STAGE_DIR:-$src_parent}"
   else
     if [[ -z "$parent" ]]; then
@@ -766,7 +780,7 @@ download_item() {
     final_pkg="$tar_path"
   fi
 
-  if [[ "$client_mode" -eq 1 ]]; then
+  if [[ "$return_mode" == "http" ]]; then
     screen "打包/上传进度: 70% (上传中)"
     client_upload_path="$(upload_artifact_to_client "$final_pkg" || true)"
     if [[ -z "$client_upload_path" ]]; then
@@ -778,8 +792,23 @@ download_item() {
     return 0
   fi
 
+  if [[ "$return_mode" == "scp" ]]; then
+    screen "打包/上传进度: 70% (SCP 回传中)"
+    client_upload_path="$(upload_artifact_via_scp "$final_pkg" || true)"
+    if [[ -z "$client_upload_path" ]]; then
+      return 1
+    fi
+    screen "打包/上传进度: 100% (SCP 回传完成)"
+    screen "$(msg downloaded)$client_upload_path"
+    rm -f "$final_pkg"
+    return 0
+  fi
+
   screen "打包/上传进度: 100% (打包完成)"
   screen "$(msg downloaded)$final_pkg"
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    screen "远程会话提示：以上路径位于当前 VPS，本地请使用 scp/sftp 下载；也可设置 BDTOOL_RETURN_MODE=http|scp 实现自动回传。"
+  fi
   return 0
 }
 
@@ -818,11 +847,6 @@ post_process_item() {
   if is_client_upload_mode; then
     download_dir=""
   else
-    if [[ -n "${SSH_CONNECTION:-}" && -z "${BDTOOL_DOWNLOAD_DIR:-}" ]]; then
-      screen_error "步骤失败：远程会话未配置客户端下载通道（请设置 BDTOOL_CLIENT_UPLOAD_URL）"
-      screen_error "$(msg op_fail)"
-      return 1
-    fi
     download_dir="$(resolve_default_download_dir)" || {
       screen_error "步骤失败：无法解析默认下载目录"
       screen_error "$(msg op_fail)"
