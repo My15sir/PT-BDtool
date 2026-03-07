@@ -408,6 +408,11 @@ resolve_source_output_layout() {
   [[ -n "$BDTOOL_SOURCE_INFO_ROOT" && -n "$BDTOOL_SOURCE_GEN_NAME" ]]
 }
 
+resolve_source_job_dir() {
+  [[ -n "${BDTOOL_SOURCE_INFO_ROOT:-}" && -n "${BDTOOL_SOURCE_GEN_NAME:-}" ]] || return 1
+  printf "%s" "$BDTOOL_SOURCE_INFO_ROOT/$BDTOOL_SOURCE_GEN_NAME"
+}
+
 bdinfo_section_has_content() {
   local report_file="${1:-}"
   local section_name="${2:-}"

@@ -8,13 +8,17 @@ FULL_LOG="$LOG_DIR/full-test.log"
 RESULTS_TSV="$LOG_DIR/full-test-results.tsv"
 TMP_FULL_LOG="$ROOT_DIR/.full-test.log.tmp"
 TMP_RESULTS_TSV="$ROOT_DIR/.full-test-results.tsv.tmp"
+TMPDIR_ROOT="$ROOT_DIR/.tmp"
+TEST_DOWNLOAD_DIR="$ROOT_DIR/bdtool-output/test-downloads"
 
 mkdir -p "$LOG_DIR"
+mkdir -p "$TMPDIR_ROOT" "$TEST_DOWNLOAD_DIR"
 touch "$RUN_LOG" "$FULL_LOG"
 : > "$TMP_FULL_LOG"
 : > "$TMP_RESULTS_TSV"
 
 : > "$RESULTS_TSV"
+rm -rf "$TEST_DOWNLOAD_DIR"/*
 
 TIMEOUT_SECONDS="${BDTOOL_CMD_TIMEOUT:-300}"
 CLI_BIN="${BDTOOL_TEST_BIN:-}"
@@ -134,7 +138,7 @@ run_step "doctor" success "$CLI_BIN" doctor
 run_step "scan-dry-invalid-input" fail "$CLI_BIN" "$ROOT_DIR/bdtool.sh" --mode dry --out "$ROOT_DIR/bdtool-output/test-run"
 run_step "bdtool-dry-noempty" success "$MENU_BIN" "$NOEMPTY_SAMPLE" --mode dry --out "$NOEMPTY_OUT"
 run_step "default-out-pathrule-video" success "$CLI_BIN" "$PATHRULE_SAMPLE" --log-level debug
-run_step "fullscan-confirm-enters-flow" success bash -c "printf '1\n1\n1\n1\n0\n0\n3\n' | BDTOOL_SCAN_FULL_ROOT='$FULLSCAN_ROOT' '$MENU_BIN'"
+run_step "fullscan-confirm-enters-flow" success env TMPDIR="$TMPDIR_ROOT" BDTOOL_DOWNLOAD_DIR="$TEST_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_ROOT" bash -c "printf '1\n1\n1\n1\n0\n0\n3\n' | '$MENU_BIN'"
 
 if ! find "$NOEMPTY_OUT" -type f -name 'README.txt' 2>/dev/null | grep -q .; then
   write_log "FULL TEST RESULT: FAIL (no output artifact for bdtool-dry-noempty)"

@@ -243,7 +243,7 @@ resolve_fixed_output_root() {
   local type="$1"
   local src="$2"
   resolve_source_output_layout "$type" "$src" || return 1
-  printf "%s" "$(dirname "$BDTOOL_SOURCE_INFO_ROOT")/PT-BDtool"
+  resolve_source_job_dir
 }
 
 create_placeholder_png() {
@@ -260,18 +260,18 @@ ensure_six_png() {
   local last=""
   local i
   for i in 1 2 3 4 5 6; do
-    if [[ -f "$dir/截图_$i.png" ]]; then
-      last="$dir/截图_$i.png"
+    if [[ -f "$dir/$i.png" ]]; then
+      last="$dir/$i.png"
       break
     fi
   done
   for i in 1 2 3 4 5 6; do
-    if [[ ! -f "$dir/截图_$i.png" ]]; then
+    if [[ ! -f "$dir/$i.png" ]]; then
       if [[ -n "$last" && -f "$last" ]]; then
-        cp -f "$last" "$dir/截图_$i.png" 2>/dev/null || create_placeholder_png "$dir/截图_$i.png"
+        cp -f "$last" "$dir/$i.png" 2>/dev/null || create_placeholder_png "$dir/$i.png"
       else
-        create_placeholder_png "$dir/截图_$i.png"
-        last="$dir/截图_$i.png"
+        create_placeholder_png "$dir/$i.png"
+        last="$dir/$i.png"
       fi
     fi
   done
@@ -279,8 +279,12 @@ ensure_six_png() {
 
 finalize_video_output() {
   local dir="$1"
-  local keep_re='^截图_[1-6]\.png$|^mediainfo_1\.txt$'
-  local file cnt
+  local keep_re='^[1-6]\.png$|^mediainfo\.txt$'
+  local file cnt i
+  for i in 1 2 3 4 5 6; do
+    [[ -s "$dir/$i.png" ]] || return 1
+  done
+  [[ -s "$dir/mediainfo.txt" ]] || return 1
   for file in "$dir"/*; do
     [[ -f "$file" ]] || continue
     if [[ ! "$(basename "$file")" =~ $keep_re ]]; then
@@ -308,8 +312,10 @@ is_audio() {
 
 finalize_audio_output() {
   local dir="$1"
-  local keep_re='^频谱图_1\.png$|^mediainfo_1\.txt$'
+  local keep_re='^频谱图\.png$|^mediainfo\.txt$'
   local file cnt
+  [[ -s "$dir/频谱图.png" ]] || return 1
+  [[ -s "$dir/mediainfo.txt" ]] || return 1
   for file in "$dir"/*; do
     [[ -f "$file" ]] || continue
     if [[ ! "$(basename "$file")" =~ $keep_re ]]; then
@@ -348,7 +354,7 @@ make_disc_screenshots() {
     (( dur_int < 12 )) && dur_int=12
     for i in 1 2 3 4 5 6; do
       sec=$(( (dur_int * i) / 7 ))
-      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1 || true
+      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1 || true
       if [[ "$progress_step" =~ ^[0-9]+$ ]] && (( progress_step > 0 )); then
         progress_pct=$((progress_base + i * progress_step))
         (( progress_pct > 99 )) && progress_pct=99
@@ -361,11 +367,11 @@ make_disc_screenshots() {
 
 finalize_disc_output() {
   local dir="$1"
-  local keep_re='^截图_[1-6]\.png$|^BDInfo_1\.txt$'
+  local keep_re='^[1-6]\.png$|^BDInfo\.txt$'
   local file cnt i
-  bdinfo_report_valid "$dir/BDInfo_1.txt" || return 1
+  bdinfo_report_valid "$dir/BDInfo.txt" || return 1
   for i in 1 2 3 4 5 6; do
-    [[ -s "$dir/截图_$i.png" ]] || return 1
+    [[ -s "$dir/$i.png" ]] || return 1
   done
   for file in "$dir"/*; do
     [[ -f "$file" ]] || continue
@@ -607,12 +613,12 @@ generate_item() {
   if [[ "$type" == "VIDEO" ]]; then
     screen "生成进度: 10% (mediainfo 生成中)"
     if require_runtime_cmd mediainfo; then
-      if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
-        echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
+      if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
+        echo "mediainfo 执行失败" > "$out/mediainfo.txt"
         hard_fail=1
       fi
     else
-      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
+      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
       hard_fail=1
     fi
     screen "生成进度: 30% (mediainfo 生成完成)"
@@ -626,7 +632,7 @@ generate_item() {
       screen "生成进度: 35% (截图生成准备)"
       for i in 1 2 3 4 5 6; do
         sec=$(( (dur_int * i) / 7 ))
-        if ! ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/截图_$i.png" >/dev/null 2>&1; then
+        if ! ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1; then
           hard_fail=1
         fi
         screen "生成进度: $((35 + i * 10))% (截图生成 ${i}/6)"
@@ -640,19 +646,19 @@ generate_item() {
   elif [[ "$type" == "AUDIO" ]]; then
     screen "生成进度: 10% (mediainfo 生成中)"
     if require_runtime_cmd mediainfo; then
-      if ! mediainfo "$src" > "$out/mediainfo_1.txt" 2>/dev/null; then
-        echo "mediainfo 执行失败" > "$out/mediainfo_1.txt"
+      if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
+        echo "mediainfo 执行失败" > "$out/mediainfo.txt"
         hard_fail=1
       fi
     else
-      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo_1.txt"
+      echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
       hard_fail=1
     fi
     screen "生成进度: 45% (mediainfo 生成完成)"
 
     screen "生成进度: 50% (频谱图生成中)"
     if require_runtime_cmd ffmpeg; then
-      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$out/频谱图_1.png" >/dev/null 2>&1; then
+      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$out/频谱图.png" >/dev/null 2>&1; then
         hard_fail=1
       fi
     else
@@ -668,7 +674,7 @@ generate_item() {
       local bd_report=""
       local bd_attempt=0
       bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
-      rm -f "$out/BDInfo_1.txt" "$bd_stdout_tmp"
+      rm -f "$out/BDInfo.txt" "$bd_stdout_tmp"
       if ! bdinfo_write_report "$bd_source" "$out" "$bd_stdout_tmp"; then
         screen_error "BDInfo 执行失败：$bd_source"
         hard_fail=1
@@ -687,15 +693,15 @@ generate_item() {
           screen_error "BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）"
           hard_fail=1
         else
-          if ! write_full_bdinfo_report "$bd_report" "$bd_source" "$out/BDInfo_1.txt"; then
-            screen_error "BDInfo 报告归档失败：$out/BDInfo_1.txt"
+          if ! write_full_bdinfo_report "$bd_report" "$bd_source" "$out/BDInfo.txt"; then
+            screen_error "BDInfo 报告归档失败：$out/BDInfo.txt"
             hard_fail=1
           fi
-          if ! bdinfo_report_valid "$out/BDInfo_1.txt"; then
-            screen_error "BDInfo 输出无效：$out/BDInfo_1.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
+          if ! bdinfo_report_valid "$out/BDInfo.txt"; then
+            screen_error "BDInfo 输出无效：$out/BDInfo.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
             hard_fail=1
           fi
-          find "$out" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
+          find "$out" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo.txt' -delete
         fi
       fi
       rm -f "$bd_stdout_tmp"
@@ -808,6 +814,7 @@ post_process_item() {
   local c=""
   local download_dir=""
   local default_action="${BDTOOL_POST_ACTION:-}"
+  local auto_cleanup="${BDTOOL_AUTO_CLEANUP:-1}"
   if is_client_upload_mode; then
     download_dir=""
   else
@@ -825,12 +832,14 @@ post_process_item() {
 
   if download_item "$out" "$download_dir"; then
     screen "$(msg op_ok)"
-    if cleanup_item "$out" >/dev/null 2>&1; then
-      screen "$(msg cleaned)$out"
-    else
-      screen_error "步骤失败：清理阶段失败（$out）"
-      screen_error "$(msg op_fail)"
-      return 1
+    if [[ "$auto_cleanup" == "1" ]]; then
+      if cleanup_item "$out" >/dev/null 2>&1; then
+        screen "$(msg cleaned)$out"
+      else
+        screen_error "步骤失败：清理阶段失败（$out）"
+        screen_error "$(msg op_fail)"
+        return 1
+      fi
     fi
   else
     screen_error "步骤失败：打包/下载阶段失败（$out）"

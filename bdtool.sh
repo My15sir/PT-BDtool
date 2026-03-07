@@ -150,11 +150,11 @@ bt_prepare_output_layout() {
   fi
 
   resolve_source_output_layout "$src_type" "$src_path" || bt_die "无法计算输出路径：$src_type $src_path"
-  root_dir="$(dirname "$BDTOOL_SOURCE_INFO_ROOT")/PT-BDtool"
+  root_dir="$(resolve_source_job_dir)" || bt_die "无法计算输出路径：$src_type $src_path"
   BT_JOB_DIR="$root_dir"
-  BT_INFO_DIR="$BT_JOB_DIR/信息"
+  BT_INFO_DIR="$BT_JOB_DIR"
   mkdir -p "$BT_INFO_DIR"
-  bt_debug "output layout=source-based root=$root_dir job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
+  bt_debug "output layout=source-based root=$BDTOOL_SOURCE_INFO_ROOT job_dir=$BT_JOB_DIR info_dir=$BT_INFO_DIR"
 }
 
 bt_is_positive_int() {
@@ -216,7 +216,7 @@ bt_resolve_bd_path() {
       return 0
     fi
     if [[ "$(basename "$p")" == "BDMV" && -d "$p/STREAM" && -d "$p/PLAYLIST" ]]; then
-      echo "$(dirname "$p")"
+      dirname "$p"
       return 0
     fi
   fi
@@ -269,7 +269,7 @@ bt_make_screenshots() {
 
   local idx=1
   while read -r sec; do
-    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/截图_${idx}.png" || bt_die "截图失败：$video"
+    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/${idx}.png" || bt_die "截图失败：$video"
     idx=$((idx + 1))
   done < <(bt_pick_random_seconds "$duration" "$n")
 }
@@ -280,7 +280,7 @@ bt_run_mediainfo_report() {
 
   bt_need_cmd mediainfo
   mkdir -p "$info_dir"
-  execute_with_spinner "生成 MediaInfo" bt_write_mediainfo "$video" "$info_dir/mediainfo_1.txt" || bt_die "MediaInfo 生成失败：$video"
+  execute_with_spinner "生成 MediaInfo" bt_write_mediainfo "$video" "$info_dir/mediainfo.txt" || bt_die "MediaInfo 生成失败：$video"
 }
 
 bt_write_mediainfo() {
@@ -392,7 +392,7 @@ bt_run_bdinfo_report() {
   mkdir -p "$info_dir"
 
   stdout_txt="$info_dir/.bdinfo_stdout_$$.txt"
-  rm -f "$info_dir/BDInfo_1.txt" "$stdout_txt"
+  rm -f "$info_dir/BDInfo.txt" "$stdout_txt"
   bt_log "BDInfo: run on $bd_path"
   if ! execute_with_spinner "生成 BDInfo" bt_write_bdinfo_report "$bd_path" "$info_dir" "$stdout_txt"; then
     err_msg="BDInfo 执行失败：$bd_path"
@@ -410,16 +410,16 @@ bt_run_bdinfo_report() {
     if [[ -z "$latest_txt" ]]; then
       err_msg="BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）（$bd_path）"
     else
-      if ! bt_write_full_bdinfo_report "$latest_txt" "$bd_path" "$info_dir/BDInfo_1.txt"; then
-        err_msg="BDInfo 报告归档失败：$info_dir/BDInfo_1.txt"
+      if ! bt_write_full_bdinfo_report "$latest_txt" "$bd_path" "$info_dir/BDInfo.txt"; then
+        err_msg="BDInfo 报告归档失败：$info_dir/BDInfo.txt"
       fi
-      if [[ -z "$err_msg" ]] && ! bt_bdinfo_report_valid "$info_dir/BDInfo_1.txt"; then
-        err_msg="BDInfo 输出无效：$info_dir/BDInfo_1.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
+      if [[ -z "$err_msg" ]] && ! bt_bdinfo_report_valid "$info_dir/BDInfo.txt"; then
+        err_msg="BDInfo 输出无效：$info_dir/BDInfo.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
       fi
     fi
   fi
 
-  find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo_1.txt' -delete
+  find "$info_dir" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo.txt' -delete
   rm -f "$stdout_txt"
   [[ -z "$err_msg" ]] || bt_die "$err_msg"
 }
@@ -427,12 +427,12 @@ bt_run_bdinfo_report() {
 bt_finalize_video_artifacts() {
   local info_dir="$1"
   local i
-  local keep_re='^截图_[1-6]\.png$|^mediainfo_1\.txt$'
+  local keep_re='^[1-6]\.png$|^mediainfo\.txt$'
 
   for i in 1 2 3 4 5 6; do
-    [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
+    [[ -s "$info_dir/${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/${i}.png"
   done
-  [[ -s "$info_dir/mediainfo_1.txt" ]] || bt_die "生成失败：未发现有效 mediainfo_1.txt（$info_dir）"
+  [[ -s "$info_dir/mediainfo.txt" ]] || bt_die "生成失败：未发现有效 mediainfo.txt（$info_dir）"
 
   while IFS= read -r f; do
     [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
@@ -448,15 +448,15 @@ bt_make_audio_spectrum() {
   local info_dir="$2"
   bt_need_cmd ffmpeg
   mkdir -p "$info_dir"
-  execute_with_spinner "生成频谱图" ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$info_dir/频谱图_1.png" || bt_die "频谱图生成失败：$audio"
+  execute_with_spinner "生成频谱图" ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$info_dir/频谱图.png" || bt_die "频谱图生成失败：$audio"
 }
 
 bt_finalize_audio_artifacts() {
   local info_dir="$1"
-  local keep_re='^频谱图_1\.png$|^mediainfo_1\.txt$'
+  local keep_re='^频谱图\.png$|^mediainfo\.txt$'
   local f cnt
-  [[ -s "$info_dir/频谱图_1.png" ]] || bt_die "生成失败：缺少有效频谱图 $info_dir/频谱图_1.png"
-  [[ -s "$info_dir/mediainfo_1.txt" ]] || bt_die "生成失败：缺少有效信息文件 $info_dir/mediainfo_1.txt"
+  [[ -s "$info_dir/频谱图.png" ]] || bt_die "生成失败：缺少有效频谱图 $info_dir/频谱图.png"
+  [[ -s "$info_dir/mediainfo.txt" ]] || bt_die "生成失败：缺少有效信息文件 $info_dir/mediainfo.txt"
   while IFS= read -r f; do
     [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
   done < <(find "$info_dir" -maxdepth 1 -type f -printf '%f\n')
@@ -477,18 +477,18 @@ bt_ensure_disc_six_png() {
   local info_dir="$1"
   local i last=""
   for i in 1 2 3 4 5 6; do
-    if [[ -s "$info_dir/截图_${i}.png" ]]; then
-      last="$info_dir/截图_${i}.png"
+    if [[ -s "$info_dir/${i}.png" ]]; then
+      last="$info_dir/${i}.png"
       break
     fi
   done
   for i in 1 2 3 4 5 6; do
-    if [[ ! -s "$info_dir/截图_${i}.png" ]]; then
+    if [[ ! -s "$info_dir/${i}.png" ]]; then
       if [[ -n "$last" && -s "$last" ]]; then
-        cp -f "$last" "$info_dir/截图_${i}.png" 2>/dev/null || bt_create_placeholder_png "$info_dir/截图_${i}.png"
+        cp -f "$last" "$info_dir/${i}.png" 2>/dev/null || bt_create_placeholder_png "$info_dir/${i}.png"
       else
-        bt_create_placeholder_png "$info_dir/截图_${i}.png"
-        last="$info_dir/截图_${i}.png"
+        bt_create_placeholder_png "$info_dir/${i}.png"
+        last="$info_dir/${i}.png"
       fi
     fi
   done
@@ -520,7 +520,7 @@ bt_make_disc_screenshots() {
     (( dur_int < 12 )) && dur_int=12
     for i in 1 2 3 4 5 6; do
       sec=$(( (dur_int * i) / 7 ))
-      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe_video" -frames:v 1 -y "$info_dir/截图_${i}.png" >/dev/null 2>&1 || true
+      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe_video" -frames:v 1 -y "$info_dir/${i}.png" >/dev/null 2>&1 || true
     done
   fi
   bt_ensure_disc_six_png "$info_dir"
@@ -528,10 +528,10 @@ bt_make_disc_screenshots() {
 
 bt_finalize_disc_artifacts() {
   local info_dir="$1"
-  local i keep_re='^截图_[1-6]\.png$|^BDInfo_1\.txt$' f cnt
-  bt_bdinfo_report_valid "$info_dir/BDInfo_1.txt" || bt_die "生成失败：缺少有效 BDInfo_1.txt（$info_dir）"
+  local i keep_re='^[1-6]\.png$|^BDInfo\.txt$' f cnt
+  bt_bdinfo_report_valid "$info_dir/BDInfo.txt" || bt_die "生成失败：缺少有效 BDInfo.txt（$info_dir）"
   for i in 1 2 3 4 5 6; do
-    [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
+    [[ -s "$info_dir/${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/${i}.png"
   done
   while IFS= read -r f; do
     [[ "$f" =~ $keep_re ]] || rm -f -- "$info_dir/$f"
@@ -630,15 +630,15 @@ bt_process_video_file() {
     bt_make_screenshots "$video" "$info_dir" "$OPT_SHOTS_N"
   fi
 
-  if [[ "$OPT_MEDIAINFO" == "1" && ! -s "$info_dir/mediainfo_1.txt" ]]; then
-    bt_die "生成失败：未发现有效 mediainfo_1.txt（$info_dir）"
+  if [[ "$OPT_MEDIAINFO" == "1" && ! -s "$info_dir/mediainfo.txt" ]]; then
+    bt_die "生成失败：未发现有效 mediainfo.txt（$info_dir）"
   fi
   if [[ "$OPT_MEDIAINFO" == "1" && "$OPT_SHOTS" == "1" ]]; then
     bt_finalize_video_artifacts "$info_dir"
   elif [[ "$OPT_SHOTS" == "1" ]]; then
     local i
     for i in 1 2 3 4 5 6; do
-      [[ -s "$info_dir/截图_${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/截图_${i}.png"
+      [[ -s "$info_dir/${i}.png" ]] || bt_die "生成失败：缺少有效截图 $info_dir/${i}.png"
     done
   fi
   bt_debug "artifact check ok type=VIDEO dir=$info_dir"
@@ -904,7 +904,8 @@ bt_cmd_clean() {
   [[ "$target" == "./bdtool-output" ]] || bt_die "clean safety check failed"
 
   if [[ -d "$target" ]]; then
-    execute_with_spinner "清理输出目录" rm -rf -- "$target" || bt_die "清理失败"
+    rm -rf -- "$target" || bt_die "清理失败"
+    log_success "清理输出目录 完成"
     bt_log "cleaned: $target"
   else
     log_info "nothing to clean"
@@ -1005,8 +1006,10 @@ bt_main() {
     exit 0
   fi
 
-  ensure_log_dir "$BT_SCRIPT_DIR"
-  setup_log_redirection "$BT_SCRIPT_DIR"
+  if [[ "${1:-}" != "clean" ]]; then
+    ensure_log_dir "$BT_SCRIPT_DIR"
+    setup_log_redirection "$BT_SCRIPT_DIR"
+  fi
 
   [[ $# -gt 0 ]] || { bt_usage; exit 0; }
 
