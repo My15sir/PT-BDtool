@@ -166,11 +166,18 @@ bt_is_positive_int() {
 # =====================
 bt_find_video_files() {
   local base="$1"
+  local path=""
   find "$base" -type f \( \
     -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.m2ts" -o -iname "*.ts" -o \
     -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.webm" -o \
     -iname "*.mpg" -o -iname "*.mpeg" \
-  \) 2>/dev/null | sort -u
+  \) 2>/dev/null | sort -u | while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if bt_bdmv_root_from_stream_file "$path" >/dev/null 2>&1; then
+      continue
+    fi
+    printf '%s\n' "$path"
+  done
 }
 
 bt_find_audio_files() {
@@ -179,6 +186,16 @@ bt_find_audio_files() {
     -iname "*.mp3" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.m4a" -o \
     -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" \
   \) 2>/dev/null | sort -u
+}
+
+bt_bdmv_root_from_stream_file() {
+  local path="${1:-}"
+  local marker="/BDMV/STREAM/"
+  local prefix=""
+  [[ -n "$path" && "$path" == *"$marker"* ]] || return 1
+  prefix="${path%%"$marker"*}"
+  [[ -n "$prefix" && -d "$prefix/BDMV/PLAYLIST" ]] || return 1
+  printf "%s" "$prefix"
 }
 
 bt_is_video_file() {
@@ -387,6 +404,7 @@ bt_run_bdinfo_report() {
   local stdout_txt=""
   local err_msg=""
   local attempt=0
+  local probe_video=""
 
   bt_need_cmd BDInfo
   mkdir -p "$info_dir"
@@ -394,8 +412,11 @@ bt_run_bdinfo_report() {
   stdout_txt="$info_dir/.bdinfo_stdout_$$.txt"
   rm -f "$info_dir/BDInfo.txt" "$stdout_txt"
   bt_log "BDInfo: run on $bd_path"
+  probe_video="$(bt_pick_disc_probe_video "$bd_path" || true)"
   if ! execute_with_spinner "生成 BDInfo" bt_write_bdinfo_report "$bd_path" "$info_dir" "$stdout_txt"; then
-    err_msg="BDInfo 执行失败：$bd_path"
+    if ! write_bdinfo_fallback_report "$bd_path" "$info_dir/BDInfo.txt" "BDInfo 执行失败或崩溃" "$probe_video"; then
+      err_msg="BDInfo 执行失败：$bd_path"
+    fi
   else
     while [[ "$attempt" -lt 10 ]]; do
       if bt_bdinfo_raw_report_valid "$stdout_txt"; then
@@ -408,7 +429,9 @@ bt_run_bdinfo_report() {
       sleep 1
     done
     if [[ -z "$latest_txt" ]]; then
-      err_msg="BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）（$bd_path）"
+      if ! write_bdinfo_fallback_report "$bd_path" "$info_dir/BDInfo.txt" "BDInfo 输出无效：缺少完整区块" "$probe_video"; then
+        err_msg="BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）（$bd_path）"
+      fi
     else
       if ! bt_write_full_bdinfo_report "$latest_txt" "$bd_path" "$info_dir/BDInfo.txt"; then
         err_msg="BDInfo 报告归档失败：$info_dir/BDInfo.txt"

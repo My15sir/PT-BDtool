@@ -310,6 +310,16 @@ is_audio() {
   esac
 }
 
+bdmv_root_from_stream_file() {
+  local path="${1:-}"
+  local marker="/BDMV/STREAM/"
+  local prefix=""
+  [[ -n "$path" && "$path" == *"$marker"* ]] || return 1
+  prefix="${path%%"$marker"*}"
+  [[ -n "$prefix" && -d "$prefix/BDMV/PLAYLIST" ]] || return 1
+  printf "%s" "$prefix"
+}
+
 finalize_audio_output() {
   local dir="$1"
   local keep_re='^频谱图\.png$|^mediainfo\.txt$'
@@ -432,8 +442,14 @@ collect_results() {
         type="ISO"
         normalized="$p"
       elif is_video "$p"; then
-        type="VIDEO"
-        normalized="$p"
+        local bdmv_root=""
+        if bdmv_root="$(bdmv_root_from_stream_file "$p")"; then
+          type="BDMV"
+          normalized="$bdmv_root"
+        else
+          type="VIDEO"
+          normalized="$p"
+        fi
       elif is_audio "$p"; then
         type="AUDIO"
         normalized="$p"
@@ -476,8 +492,14 @@ collect_results() {
         type="ISO"
         normalized="$p"
       elif is_video "$p"; then
-        type="VIDEO"
-        normalized="$p"
+        local bdmv_root=""
+        if bdmv_root="$(bdmv_root_from_stream_file "$p")"; then
+          type="BDMV"
+          normalized="$bdmv_root"
+        else
+          type="VIDEO"
+          normalized="$p"
+        fi
       elif is_audio "$p"; then
         type="AUDIO"
         normalized="$p"
@@ -689,9 +711,13 @@ generate_item() {
       local bd_attempt=0
       bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
       rm -f "$out/BDInfo.txt" "$bd_stdout_tmp"
+      local disc_probe_video=""
+      disc_probe_video="$(pick_disc_probe_video "$src" || true)"
       if ! bdinfo_write_report "$bd_source" "$out" "$bd_stdout_tmp"; then
-        screen_error "BDInfo 执行失败：$bd_source"
-        hard_fail=1
+        screen_error "BDInfo 执行失败，改用降级报告继续导出：$bd_source"
+        if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "BDInfo 执行失败或崩溃" "$disc_probe_video"; then
+          hard_fail=1
+        fi
       else
         while (( bd_attempt < 10 )); do
           if bdinfo_raw_report_valid "$bd_stdout_tmp"; then
@@ -704,8 +730,10 @@ generate_item() {
           sleep 1
         done
         if [[ -z "$bd_report" ]]; then
-          screen_error "BDInfo 输出无效：缺少完整区块（DISC INFO/PLAYLIST REPORT/VIDEO/AUDIO/SUBTITLES/FILES）"
-          hard_fail=1
+          screen_error "BDInfo 输出无效，改用降级报告继续导出"
+          if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "BDInfo 输出无效：缺少完整区块" "$disc_probe_video"; then
+            hard_fail=1
+          fi
         else
           if ! write_full_bdinfo_report "$bd_report" "$bd_source" "$out/BDInfo.txt"; then
             screen_error "BDInfo 报告归档失败：$out/BDInfo.txt"
