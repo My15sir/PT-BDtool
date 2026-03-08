@@ -633,15 +633,8 @@ write_full_bdinfo_report() {
   local raw_report="${1:-}"
   local scan_target="${2:-}"
   local out_report="${3:-}"
-  local scan_ts=""
   [[ -s "$raw_report" && -n "$scan_target" && -n "$out_report" ]] || return 1
-  scan_ts="$(date '+%Y-%m-%d %H:%M:%S %z')"
-  {
-    printf "BDInfo: BDInfoCLI-ng\n"
-    printf "扫描文件: %s\n" "$scan_target"
-    printf "扫描时间: %s\n" "$scan_ts"
-    sed 's/\r$//' "$raw_report"
-  } > "$out_report"
+  sed 's/\r$//' "$raw_report" > "$out_report"
 }
 
 bdinfo_write_report() {
@@ -802,7 +795,10 @@ bdinfo_report_valid() {
   [[ -s "$report_file" ]] || return 1
   line_count="$(wc -l < "$report_file" | tr -d ' ')"
   [[ "$line_count" =~ ^[0-9]+$ ]] || return 1
-  (( line_count >= 30 )) || return 1
+  (( line_count >= 20 )) || return 1
+  if bdinfo_raw_report_valid "$report_file"; then
+    return 0
+  fi
   bdinfo_match_line "$report_file" '^BDInfo:[[:space:]].+' || return 1
   bdinfo_match_line "$report_file" '^扫描文件:[[:space:]].+' || return 1
   bdinfo_match_line "$report_file" '^扫描时间:[[:space:]].+' || return 1
