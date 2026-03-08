@@ -65,6 +65,20 @@ pt
 - `pt` / `bdtool`：默认进入菜单模式
 - `pt --help` / `bdtool --help`：显示命令帮助
 
+如果你是“**本机控制 VPS，结果自动回到本机桌面**”这个场景，推荐直接用：
+
+```bash
+ptbd-remote --host root@你的VPSIP
+```
+
+这个命令会自动做几件事：
+- 在你本机临时启动接收服务
+- 自动建立到 VPS 的回传通道
+- 打开 VPS 上的 `pt` 菜单
+- 你只需要在菜单里选要处理的条目
+- 处理完成后自动回传到你本机桌面
+- 默认自动清理 VPS 上本次生成目录
+
 ### 5）菜单里怎么走
 
 进入菜单后，按这个顺序走就行：
@@ -200,6 +214,43 @@ pt
 - `BDTOOL_SCAN_INCLUDE_ROOTS`：白名单，多个目录用空格或逗号分隔
 - `BDTOOL_SCAN_EXCLUDE_ROOTS`：额外排除目录，多个目录用空格或逗号分隔
 - 如果你已经明确知道媒体都在 `~/Downloads`，强烈建议直接用白名单，速度和结果都会更干净
+
+### 一步到位：本机控制 VPS，自动回传桌面
+
+如果你希望用户安装好后，只要“进入菜单选文件”，后面的步骤都自动完成，推荐用这个命令：
+
+```bash
+ptbd-remote --host root@你的VPSIP --scan-include "/home/admin/Downloads"
+```
+
+如果 VPS 还没配 SSH 密钥，也可以先临时用密码：
+
+```bash
+ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/home/admin/Downloads"
+```
+
+这个模式下，用户实际只需要做两件事：
+
+1. 在本机运行 `ptbd-remote`
+2. 在远端菜单里选要处理的条目
+
+后面的动作会自动完成：
+- 自动生成
+- 自动打包
+- 自动回传到本机桌面
+- 自动清理 VPS 上本次生成目录
+
+默认回传目录：
+
+```bash
+~/Desktop
+```
+
+如果你想换成本机其他目录：
+
+```bash
+ptbd-remote --host root@你的VPSIP --save-dir /你的/保存目录
+```
 
 ---
 

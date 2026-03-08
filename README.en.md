@@ -65,6 +65,20 @@ Notes:
 - `pt` / `bdtool`: open menu mode by default
 - `pt --help` / `bdtool --help`: show CLI help
 
+If your workflow is “**control a VPS from your local machine and return the result to your local desktop automatically**”, use:
+
+```bash
+ptbd-remote --host root@your-vps-ip
+```
+
+This command automatically:
+- starts a temporary local receive server
+- creates the return tunnel to the VPS
+- opens the remote `pt` menu
+- lets you choose an item
+- returns the generated package to your local desktop
+- cleans the remote generated directory by default
+
 ### 5) Follow the menu
 
 Inside the menu, the normal path is:
@@ -197,6 +211,43 @@ Notes:
 - `BDTOOL_SCAN_INCLUDE_ROOTS`: whitelist roots, separated by spaces or commas
 - `BDTOOL_SCAN_EXCLUDE_ROOTS`: extra excluded roots, separated by spaces or commas
 - If you already know your media lives under `~/Downloads`, using a whitelist is strongly recommended
+
+### One-Step VPS Workflow: Local Control + Auto Return
+
+If you want end users to install once, select an item, and let everything else happen automatically, use:
+
+```bash
+ptbd-remote --host root@your-vps-ip --scan-include "/home/admin/Downloads"
+```
+
+If SSH keys are not ready yet, password mode also works:
+
+```bash
+ptbd-remote --host root@your-vps-ip --password 'your-password' --scan-include "/home/admin/Downloads"
+```
+
+In this mode, the user only needs to:
+
+1. run `ptbd-remote` on the local machine
+2. choose the target item in the remote menu
+
+Everything after that runs automatically:
+- generate artifacts
+- package the result
+- return it to the local desktop
+- clean the generated directory on the VPS
+
+Default local target:
+
+```bash
+~/Desktop
+```
+
+To save somewhere else:
+
+```bash
+ptbd-remote --host root@your-vps-ip --save-dir /your/save/path
+```
 
 ---
 

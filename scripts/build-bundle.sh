@@ -18,16 +18,18 @@ cp -f "$ROOT_DIR/bdtool" "$PKG_ROOT/bdtool"
 cp -f "$ROOT_DIR/bdtool.sh" "$PKG_ROOT/bdtool.sh"
 cp -f "$ROOT_DIR/install.sh" "$PKG_ROOT/install.sh"
 cp -f "$ROOT_DIR/ptbd-start.sh" "$PKG_ROOT/ptbd-start.sh"
+cp -f "$ROOT_DIR/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote.sh"
 cp -f "$ROOT_DIR/README.md" "$PKG_ROOT/README.md"
 mkdir -p "$PKG_ROOT/lib" "$PKG_ROOT/scripts" "$PKG_ROOT/third_party/bundle/linux-amd64"
 cp -f "$ROOT_DIR/lib/ui.sh" "$PKG_ROOT/lib/ui.sh"
 cp -f "$ROOT_DIR/lib/i18n.sh" "$PKG_ROOT/lib/i18n.sh"
 cp -f "$ROOT_DIR/scripts/deps.env" "$PKG_ROOT/scripts/deps.env"
 cp -f "$ROOT_DIR/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/fetch-deps.sh"
+cp -f "$ROOT_DIR/scripts/remote-upload-server.py" "$PKG_ROOT/scripts/remote-upload-server.py"
 cp -f "$ROOT_DIR/scripts/update-deps.sh" "$PKG_ROOT/scripts/update-deps.sh" 2>/dev/null || true
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/bin" "$PKG_ROOT/third_party/bundle/linux-amd64/"
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/lib" "$PKG_ROOT/third_party/bundle/linux-amd64/"
-chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/scripts/fetch-deps.sh" || true
+chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/ptbd-remote.sh" "$PKG_ROOT/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/remote-upload-server.py" || true
 
 rm -f "$OUT_TAR"
 tar -czf "$OUT_TAR" -C "$ROOT_DIR/.tmp-dist" PT-BDtool-linux-amd64
