@@ -176,6 +176,9 @@ bt_find_video_files() {
     if bt_bdmv_root_from_stream_file "$path" >/dev/null 2>&1; then
       continue
     fi
+    if ! bt_is_video_file "$path"; then
+      continue
+    fi
     printf '%s\n' "$path"
   done
 }
@@ -204,7 +207,14 @@ bt_is_video_file() {
   l="$(echo "$p" | tr '[:upper:]' '[:lower:]')"
   case "$l" in
     *.d.ts) return 1 ;;
-    *.mkv|*.mp4|*.m2ts|*.ts|*.avi|*.mov|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
+    *.ts)
+      if command -v ffprobe >/dev/null 2>&1; then
+        ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "$p" 2>/dev/null | grep -qx 'video'
+        return $?
+      fi
+      return 1
+      ;;
+    *.mkv|*.mp4|*.m2ts|*.avi|*.mov|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
     *) return 1 ;;
   esac
 }
