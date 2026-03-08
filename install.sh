@@ -49,9 +49,11 @@ preflight_install_context() {
   local required_project_files=(
     "$SCRIPT_DIR/bdtool"
     "$SCRIPT_DIR/bdtool.sh"
+    "$SCRIPT_DIR/ptbd"
     "$SCRIPT_DIR/ptbd-start.sh"
     "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/ptbd-remote-start.sh"
+    "$SCRIPT_DIR/PT-BDtool.desktop"
     "$SCRIPT_DIR/lib/ui.sh"
     "$SCRIPT_DIR/lib/i18n.sh"
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
@@ -123,6 +125,24 @@ bundle_dep_status() {
   return "$missing"
 }
 
+resolve_effective_home() {
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    local sudo_home=""
+    sudo_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    if [[ -n "$sudo_home" && -d "$sudo_home" ]]; then
+      printf '%s\n' "$sudo_home"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${HOME:-}" ]]; then
+    printf '%s\n' "$HOME"
+    return 0
+  fi
+
+  return 1
+}
+
 should_skip_bundle_sync() {
   local src_bundle="$1"
   local dst_bundle="$2"
@@ -162,6 +182,7 @@ install_entrypoints() {
   local bin_dir="$2"
   local bdtool_link="$bin_dir/bdtool"
   local start_link="$bin_dir/ptbd-start"
+  local easy_link="$bin_dir/ptbd"
   local pt_link="$bin_dir/pt"
   local pts_link="$bin_dir/pts"
   local remote_link="$bin_dir/ptbd-remote"
@@ -171,12 +192,14 @@ install_entrypoints() {
   # Force-replace stale copied wrappers (regular files) from old versions.
   [[ -e "$bdtool_link" && ! -L "$bdtool_link" ]] && rm -f "$bdtool_link"
   [[ -e "$start_link" && ! -L "$start_link" ]] && rm -f "$start_link"
+  [[ -e "$easy_link" && ! -L "$easy_link" ]] && rm -f "$easy_link"
   [[ -e "$pt_link" && ! -L "$pt_link" ]] && rm -f "$pt_link"
   [[ -e "$pts_link" && ! -L "$pts_link" ]] && rm -f "$pts_link"
   [[ -e "$remote_link" && ! -L "$remote_link" ]] && rm -f "$remote_link"
   [[ -e "$remote_start_link" && ! -L "$remote_start_link" ]] && rm -f "$remote_start_link"
 
   ln -sfn "$install_root/bdtool" "$bdtool_link"
+  ln -sfn "$install_root/ptbd" "$easy_link"
   ln -sfn "$install_root/ptbd-start.sh" "$start_link"
   ln -sfn "$install_root/bdtool" "$pt_link"
   ln -sfn "$install_root/ptbd-start.sh" "$pts_link"
@@ -212,6 +235,7 @@ post_install_self_check() {
   local required_files=(
     "$install_root/bdtool"
     "$install_root/bdtool.sh"
+    "$install_root/ptbd"
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
     "$install_root/ptbd-remote-start.sh"
@@ -244,6 +268,12 @@ post_install_self_check() {
     log "self-check ok: entrypoint $bin_dir/ptbd-start"
   else
     err "self-check missing entrypoint: $bin_dir/ptbd-start"
+    fail=1
+  fi
+  if [[ -x "$bin_dir/ptbd" ]]; then
+    log "self-check ok: entrypoint $bin_dir/ptbd"
+  else
+    err "self-check missing entrypoint: $bin_dir/ptbd"
     fail=1
   fi
   if [[ -x "$bin_dir/pt" ]]; then
@@ -293,6 +323,10 @@ post_install_self_check() {
     err "self-check failed: $bin_dir/ptbd-start --help"
     fail=1
   fi
+  if ! "$bin_dir/ptbd" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/ptbd --help"
+    fail=1
+  fi
   if ! "$bin_dir/pt" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/pt --help"
     fail=1
@@ -324,6 +358,13 @@ post_install_self_check() {
   if [[ -n "$resolved_start" && "$resolved_start" != "$bin_dir/ptbd-start" ]]; then
     err "PATH entry mismatch: command -v ptbd-start -> $resolved_start (expected $bin_dir/ptbd-start)"
     err "copy-paste fix: rm -f \"$resolved_start\" && hash -r && \"$bin_dir/ptbd-start\" --help"
+    fail=1
+  fi
+  local resolved_easy=""
+  resolved_easy="$(command -v ptbd 2>/dev/null || true)"
+  if [[ -n "$resolved_easy" && "$resolved_easy" != "$bin_dir/ptbd" ]]; then
+    err "PATH entry mismatch: command -v ptbd -> $resolved_easy (expected $bin_dir/ptbd)"
+    err "copy-paste fix: rm -f \"$resolved_easy\" && hash -r && \"$bin_dir/ptbd\" --help"
     fail=1
   fi
   resolved_pt="$(command -v pt 2>/dev/null || true)"
@@ -364,12 +405,14 @@ post_install_self_check() {
 EOF
     {
       echo "[DIAG] command -v bdtool: $(command -v bdtool 2>/dev/null || echo missing)"
+      echo "[DIAG] command -v ptbd: $(command -v ptbd 2>/dev/null || echo missing)"
       echo "[DIAG] command -v ptbd-start: $(command -v ptbd-start 2>/dev/null || echo missing)"
       echo "[DIAG] command -v pt: $(command -v pt 2>/dev/null || echo missing)"
       echo "[DIAG] command -v pts: $(command -v pts 2>/dev/null || echo missing)"
       echo "[DIAG] command -v ptbd-remote: $(command -v ptbd-remote 2>/dev/null || echo missing)"
       echo "[DIAG] command -v ptbd-remote-start: $(command -v ptbd-remote-start 2>/dev/null || echo missing)"
       [[ -e "$bin_dir/bdtool" ]] && ls -l "$bin_dir/bdtool" || echo "[DIAG] missing: $bin_dir/bdtool"
+      [[ -e "$bin_dir/ptbd" ]] && ls -l "$bin_dir/ptbd" || echo "[DIAG] missing: $bin_dir/ptbd"
       [[ -e "$bin_dir/ptbd-start" ]] && ls -l "$bin_dir/ptbd-start" || echo "[DIAG] missing: $bin_dir/ptbd-start"
       [[ -e "$bin_dir/pt" ]] && ls -l "$bin_dir/pt" || echo "[DIAG] missing: $bin_dir/pt"
       [[ -e "$bin_dir/pts" ]] && ls -l "$bin_dir/pts" || echo "[DIAG] missing: $bin_dir/pts"
@@ -461,6 +504,7 @@ log "install root: $INSTALL_ROOT"
 mkdir -p "$INSTALL_ROOT/lib" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
 copy_if_changed "$SCRIPT_DIR/bdtool" "$INSTALL_ROOT/bdtool" "bdtool"
 copy_if_changed "$SCRIPT_DIR/bdtool.sh" "$INSTALL_ROOT/bdtool.sh" "bdtool.sh"
+copy_if_changed "$SCRIPT_DIR/ptbd" "$INSTALL_ROOT/ptbd" "ptbd"
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote-start.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "ptbd-remote-start.sh"
@@ -476,7 +520,39 @@ copy_if_changed "$SCRIPT_DIR/lib/i18n.sh" "$INSTALL_ROOT/lib/i18n.sh" "lib/i18n.
 mkdir -p "$INSTALL_ROOT/scripts"
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py"
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py"
+
+install_desktop_launcher() {
+  local install_root="$1"
+  local bin_dir="$2"
+  local user_home=""
+  local desktop_dir=""
+  local applications_dir=""
+  local launcher_path=""
+  user_home="$(resolve_effective_home)" || return 0
+  applications_dir="$user_home/.local/share/applications"
+  desktop_dir="$user_home/Desktop"
+  [[ -d "$user_home/桌面" ]] && desktop_dir="$user_home/桌面"
+  mkdir -p "$applications_dir"
+  launcher_path="$applications_dir/PT-BDtool.desktop"
+  cat > "$launcher_path" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PT-BDtool
+Comment=Beginner-friendly PT-BDtool launcher
+Exec=$bin_dir/ptbd-start
+Terminal=true
+Categories=Utility;
+EOF
+  chmod +x "$launcher_path"
+  if [[ -d "$desktop_dir" && -w "$desktop_dir" ]]; then
+    cp -f "$launcher_path" "$desktop_dir/PT-BDtool.desktop"
+    chmod +x "$desktop_dir/PT-BDtool.desktop"
+    log "installed desktop launcher: $desktop_dir/PT-BDtool.desktop"
+  fi
+  log "installed desktop launcher: $launcher_path"
+}
 log "install stage done (elapsed=$(elapsed_since "$INSTALL_TS"), copied=$COPIED_COUNT, skipped=$SKIPPED_COUNT)"
 
 if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then
@@ -486,6 +562,7 @@ else
 fi
 install_entrypoints "$INSTALL_ROOT" "$BIN_DIR"
 install_runtime_wrappers "$INSTALL_ROOT" "$BIN_DIR"
+install_desktop_launcher "$INSTALL_ROOT" "$BIN_DIR"
 # Refresh command lookup cache so post-check sees the new symlink entrypoints.
 hash -r 2>/dev/null || true
 if [[ "$BIN_DIR" == "$HOME/.local/bin" ]]; then
@@ -495,7 +572,7 @@ fi
 post_install_self_check "$INSTALL_ROOT" "$BIN_DIR"
 
 log "offline install complete: $INSTALL_ROOT"
-log "entrypoints: $BIN_DIR/bdtool / $BIN_DIR/ptbd-start"
+log "entrypoints: $BIN_DIR/ptbd / $BIN_DIR/ptbd-start / $BIN_DIR/bdtool"
 log "total elapsed: $(elapsed_since "$START_TS")"
 
 if [[ "$NON_INTERACTIVE" == "1" ]]; then
@@ -518,3 +595,6 @@ if [[ -t 0 && -t 1 ]]; then
 fi
 
 log "non-interactive terminal detected: skip auto launch"
+if [[ -f "$SCRIPT_DIR/PT-BDtool.desktop" ]]; then
+  copy_if_changed "$SCRIPT_DIR/PT-BDtool.desktop" "$INSTALL_ROOT/PT-BDtool.desktop" "PT-BDtool.desktop"
+fi

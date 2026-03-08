@@ -55,20 +55,23 @@ For `zsh`, replace `~/.bashrc` with `~/.zshrc`.
 
 ### 4) Start
 
+From now on, **`ptbd` is the recommended single entrypoint** for beginners.
+
 The simplest start command is:
 
 ```bash
-pt
+ptbd
 ```
 
 Notes:
+- `ptbd`: beginner entrypoint; uses local or VPS mode based on saved setup
 - `pt` / `bdtool`: open menu mode by default
 - `pt --help` / `bdtool --help`: show CLI help
 
 If your workflow is “**control a VPS from your local machine and return the result to your local desktop automatically**”, use:
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 On first run, `--setup` asks for:
@@ -81,13 +84,13 @@ On first run, `--setup` asks for:
 After setup, you can simply run:
 
 ```bash
-ptbd-remote
+ptbd
 ```
 
 If you prefer a more double-click-friendly entry, you can also use:
 
 ```bash
-ptbd-remote-start
+ptbd-start
 ```
 
 It automatically:
@@ -162,10 +165,13 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 
 ## Actual Runtime Model
 
-This is how the project really works now:
+This is the recommended way to think about it now:
 
 - `install.sh`: installs the app and bundled offline dependencies
-- `pt` / `bdtool`: open menu mode by default
+- `ptbd`: beginner entrypoint
+- `ptbd --setup`: first-time setup
+- `ptbd-start`: double-click-friendly starter
+- `pt` / `bdtool`: legacy and advanced entrypoints
 - `bdtool <file-or-dir>`: run direct CLI processing
 - `bdtool doctor`: check runtime dependencies
 - `bdtool status`: check installation state
@@ -175,7 +181,7 @@ For most beginners, only these two commands matter:
 
 ```bash
 bash install.sh --offline
-pt
+ptbd --setup
 ```
 
 ---
@@ -236,24 +242,24 @@ Notes:
 If you want end users to install once, select an item, and let everything else happen automatically, use:
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 Then for daily use:
 
 ```bash
-ptbd-remote
+ptbd
 ```
 
 In this mode, the user only needs to:
 
-1. run `ptbd-remote` on the local machine
+1. run `ptbd` on the local machine
 2. choose the target item in the remote menu
 
 Desktop users can also run:
 
 ```bash
-ptbd-remote-start
+ptbd-start
 ```
 
 Everything after that runs automatically:
@@ -271,7 +277,7 @@ Default local target:
 To save somewhere else:
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 If you prefer a one-off command without setup, this still works:

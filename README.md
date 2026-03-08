@@ -55,20 +55,23 @@ source ~/.bashrc
 
 ### 4）启动
 
+现在推荐把 **`ptbd` 当成唯一主入口** 来理解。
+
 最简单的启动方式：
 
 ```bash
-pt
+ptbd
 ```
 
 说明：
-- `pt` / `bdtool`：默认进入菜单模式
+- `ptbd`：小白主入口，会根据你的配置自动进入本机模式或 VPS 模式
+- `pt` / `bdtool`：保留给旧用法和高级用户
 - `pt --help` / `bdtool --help`：显示命令帮助
 
 如果你是“**本机控制 VPS，结果自动回到本机桌面**”这个场景，推荐直接用：
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 第一次运行 `--setup` 后，按提示填好：
@@ -81,13 +84,13 @@ ptbd-remote --setup
 配置完成后，以后直接运行：
 
 ```bash
-ptbd-remote
+ptbd
 ```
 
 如果你更希望用一个更适合双击的入口，也可以用：
 
 ```bash
-ptbd-remote-start
+ptbd-start
 ```
 
 它会自动做几件事：
@@ -165,10 +168,13 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 
 ## 真正的启动 / 运行逻辑
 
-这个项目现在的真实使用方式可以简单理解成这样：
+这个项目现在推荐这样理解：
 
 - `install.sh`：把程序和离线依赖安装到本机
-- `pt` / `bdtool`：默认进菜单模式
+- `ptbd`：小白主入口
+- `ptbd --setup`：首次配置
+- `ptbd-start`：双击友好入口
+- `pt` / `bdtool`：旧入口和高级入口
 - `bdtool <文件或目录>`：直接走命令模式
 - `bdtool doctor`：检查依赖
 - `bdtool status`：检查安装状态
@@ -178,7 +184,7 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 
 ```bash
 bash install.sh --offline
-pt
+ptbd --setup
 ```
 
 ---
@@ -239,24 +245,24 @@ pt
 如果你希望用户安装好后，只要“进入菜单选文件”，后面的步骤都自动完成，推荐用这个命令：
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 配好后，平时直接运行：
 
 ```bash
-ptbd-remote
+ptbd
 ```
 
 这个模式下，用户实际只需要做两件事：
 
-1. 在本机运行 `ptbd-remote`
+1. 在本机运行 `ptbd`
 2. 在远端菜单里选要处理的条目
 
 如果你是图形桌面用户，也可以直接运行：
 
 ```bash
-ptbd-remote-start
+ptbd-start
 ```
 
 后面的动作会自动完成：
@@ -274,7 +280,7 @@ ptbd-remote-start
 如果你想换成本机其他目录：
 
 ```bash
-ptbd-remote --setup
+ptbd --setup
 ```
 
 如果你不想进向导，也仍然可以直接一次性写参数：

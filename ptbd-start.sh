@@ -65,23 +65,54 @@ if [[ -n "$APP_ROOT" && -f "$APP_ROOT/lib/ui.sh" ]]; then
   setup_bundle_runtime "$APP_ROOT"
 fi
 
+run_beginner_entry() {
+  if [[ -n "$APP_ROOT" && -x "$APP_ROOT/ptbd" ]]; then
+    "$APP_ROOT/ptbd" "$@"
+    return $?
+  fi
+
+  if command -v ptbd >/dev/null 2>&1; then
+    ptbd "$@"
+    return $?
+  fi
+
+  if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool" ]]; then
+    "$APP_ROOT/bdtool" "$@"
+    return $?
+  fi
+
+  if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool.sh" ]]; then
+    "$APP_ROOT/bdtool.sh" "$@"
+    return $?
+  fi
+
+  if command -v bdtool >/dev/null 2>&1; then
+    bdtool "$@"
+    return $?
+  fi
+
+  echo "[ERROR] Cannot find PT-BDtool entrypoint." >&2
+  echo "[HINT] Reinstall from project root: bash install.sh --offline" >&2
+  echo "Tried: \`ptbd\`, \`${APP_ROOT:-$SCRIPT_DIR}/ptbd\`, \`bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool.sh\`" >&2
+  return 1
+}
+
 echo "================================"
 echo "Starting PT-BDtool workflow..."
 echo "================================"
 
-if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool" ]]; then
-  exec "$APP_ROOT/bdtool" "$@"
+run_beginner_entry "$@"
+rc=$?
+case "${1:-}" in
+  -h|--help|--setup|--show-config) exit "$rc" ;;
+esac
+if [[ -t 0 && -t 1 ]]; then
+  echo
+  if [[ "$rc" -eq 0 ]]; then
+    echo "处理结束。按回车关闭。"
+  else
+    echo "执行失败（rc=$rc）。按回车关闭。"
+  fi
+  read -r _ < /dev/tty || true
 fi
-
-if [[ -n "$APP_ROOT" && -x "$APP_ROOT/bdtool.sh" ]]; then
-  exec "$APP_ROOT/bdtool.sh" "$@"
-fi
-
-if command -v bdtool >/dev/null 2>&1; then
-  exec bdtool "$@"
-fi
-
-echo "[ERROR] Cannot find bdtool entrypoint." >&2
-echo "[HINT] Reinstall from project root: bash install.sh --offline" >&2
-echo "Tried: \`bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool.sh\`" >&2
-exit 1
+exit "$rc"

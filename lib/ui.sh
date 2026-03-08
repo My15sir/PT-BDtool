@@ -290,17 +290,21 @@ upload_artifact_to_client() {
   upload_url="$(build_client_upload_url "$(basename "$artifact_file")")" || return 1
   resp_file="$(mktemp)"
   err_file="$(mktemp)"
-  "$curl_bin" --fail --silent --show-error --connect-timeout 10 --max-time 600 \
+  "$curl_bin" --fail --silent --show-error --connect-timeout 10 --max-time 600 --http1.0 \
+    -H 'Expect:' \
     -X PUT --data-binary @"$artifact_file" "$upload_url" >"$resp_file" 2>"$err_file" &
   local curl_pid=$!
+  local curl_state=""
   while kill -0 "$curl_pid" 2>/dev/null; do
+    curl_state="$(ps -o stat= -p "$curl_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -z "$curl_state" || "$curl_state" == Z* ]]; then
+      break
+    fi
     sleep 2
     elapsed_s=$((elapsed_s + 2))
     log_info "上传进行中（${elapsed_s}s）"
   done
-  if ! wait "$curl_pid"; then
-    curl_rc=$?
-  fi
+  wait "$curl_pid" || curl_rc=$?
   upload_resp="$(cat "$resp_file" 2>/dev/null || true)"
   curl_err_msg="$(head -n1 "$err_file" 2>/dev/null || true)"
   rm -f "$resp_file" "$err_file"
