@@ -101,6 +101,22 @@ It automatically:
 - returns the generated package to your local desktop
 - cleans the remote generated directory by default
 
+If you want a more GUI-style workflow on **Windows / macOS / Linux**, you can also try:
+
+```bash
+ptbd-gui
+```
+
+This is the current cross-platform GUI MVP. It helps you:
+- fill in the VPS address, password, and local save dir
+- save the config
+- click one button to start the current remote flow
+
+The repo also includes double-click launcher files:
+- `PT-BDtool.bat`: better for Windows
+- `PT-BDtool.command`: better for macOS
+- `PT-BDtool.desktop`: better for Linux
+
 ### 5) Follow the menu
 
 Inside the menu, the normal path is:
@@ -171,6 +187,7 @@ This is the recommended way to think about it now:
 - `ptbd`: beginner entrypoint
 - `ptbd --setup`: first-time setup
 - `ptbd-start`: double-click-friendly starter
+- `ptbd-gui`: cross-platform GUI launcher MVP
 - `pt` / `bdtool`: legacy and advanced entrypoints
 - `bdtool <file-or-dir>`: run direct CLI processing
 - `bdtool doctor`: check runtime dependencies

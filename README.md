@@ -101,6 +101,22 @@ ptbd-start
 - 处理完成后自动回传到你本机桌面
 - 默认自动清理 VPS 上本次生成目录
 
+如果你想在 **Windows / macOS / Linux** 上尽量走“图形窗口 + 双击”路线，也可以试试：
+
+```bash
+ptbd-gui
+```
+
+这是当前的跨平台 GUI MVP，主要做这几件事：
+- 先填 VPS 地址、密码、本机保存目录
+- 保存后点击“一步到位启动”
+- 再进入现有远端菜单流程
+
+仓库里也附带了几个双击文件：
+- `PT-BDtool.bat`：更适合 Windows
+- `PT-BDtool.command`：更适合 macOS
+- `PT-BDtool.desktop`：更适合 Linux
+
 ### 5）菜单里怎么走
 
 进入菜单后，按这个顺序走就行：
@@ -174,6 +190,7 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 - `ptbd`：小白主入口
 - `ptbd --setup`：首次配置
 - `ptbd-start`：双击友好入口
+- `ptbd-gui`：跨平台图形启动器 MVP
 - `pt` / `bdtool`：旧入口和高级入口
 - `bdtool <文件或目录>`：直接走命令模式
 - `bdtool doctor`：检查依赖

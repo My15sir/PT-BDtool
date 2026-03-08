@@ -17,11 +17,15 @@ bash "$SCRIPT_DIR/fetch-deps.sh"
 cp -f "$ROOT_DIR/bdtool" "$PKG_ROOT/bdtool"
 cp -f "$ROOT_DIR/bdtool.sh" "$PKG_ROOT/bdtool.sh"
 cp -f "$ROOT_DIR/ptbd" "$PKG_ROOT/ptbd"
+cp -f "$ROOT_DIR/ptbd-gui" "$PKG_ROOT/ptbd-gui"
+cp -f "$ROOT_DIR/ptbd-gui.py" "$PKG_ROOT/ptbd-gui.py"
 cp -f "$ROOT_DIR/install.sh" "$PKG_ROOT/install.sh"
 cp -f "$ROOT_DIR/ptbd-start.sh" "$PKG_ROOT/ptbd-start.sh"
 cp -f "$ROOT_DIR/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote.sh"
 cp -f "$ROOT_DIR/ptbd-remote-start.sh" "$PKG_ROOT/ptbd-remote-start.sh"
 cp -f "$ROOT_DIR/PT-BDtool.desktop" "$PKG_ROOT/PT-BDtool.desktop"
+cp -f "$ROOT_DIR/PT-BDtool.command" "$PKG_ROOT/PT-BDtool.command"
+cp -f "$ROOT_DIR/PT-BDtool.bat" "$PKG_ROOT/PT-BDtool.bat"
 cp -f "$ROOT_DIR/README.md" "$PKG_ROOT/README.md"
 mkdir -p "$PKG_ROOT/lib" "$PKG_ROOT/scripts" "$PKG_ROOT/third_party/bundle/linux-amd64"
 cp -f "$ROOT_DIR/lib/ui.sh" "$PKG_ROOT/lib/ui.sh"
@@ -32,7 +36,7 @@ cp -f "$ROOT_DIR/scripts/remote-upload-server.py" "$PKG_ROOT/scripts/remote-uplo
 cp -f "$ROOT_DIR/scripts/update-deps.sh" "$PKG_ROOT/scripts/update-deps.sh" 2>/dev/null || true
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/bin" "$PKG_ROOT/third_party/bundle/linux-amd64/"
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/lib" "$PKG_ROOT/third_party/bundle/linux-amd64/"
-chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/ptbd" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote-start.sh" "$PKG_ROOT/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/remote-upload-server.py" || true
+chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/ptbd" "$PKG_ROOT/ptbd-gui" "$PKG_ROOT/ptbd-gui.py" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote-start.sh" "$PKG_ROOT/PT-BDtool.command" "$PKG_ROOT/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/remote-upload-server.py" || true
 
 rm -f "$OUT_TAR"
 tar -czf "$OUT_TAR" -C "$ROOT_DIR/.tmp-dist" PT-BDtool-linux-amd64
