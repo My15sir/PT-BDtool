@@ -164,6 +164,40 @@ Why this is recommended:
 - easier troubleshooting
 - lower chance of user error
 
+### VPS Scan Advice
+
+When `pt` runs a **full scan over SSH / on a VPS**, it now prefers these roots by default:
+
+```bash
+/home /root /data /mnt /media /srv
+```
+
+This helps avoid common noise such as:
+- `node_modules`
+- `.git`
+- `.cache`
+- `/var/lib/docker`
+- `/proc` `/sys` `/dev` `/run`
+
+If you want to define an explicit whitelist, use:
+
+```bash
+export BDTOOL_SCAN_INCLUDE_ROOTS="/home/admin/Downloads /data/media"
+pt
+```
+
+If you also want extra excludes, use:
+
+```bash
+export BDTOOL_SCAN_EXCLUDE_ROOTS="/home/admin/.cache /home/admin/test"
+pt
+```
+
+Notes:
+- `BDTOOL_SCAN_INCLUDE_ROOTS`: whitelist roots, separated by spaces or commas
+- `BDTOOL_SCAN_EXCLUDE_ROOTS`: extra excluded roots, separated by spaces or commas
+- If you already know your media lives under `~/Downloads`, using a whitelist is strongly recommended
+
 ---
 
 ## If You Want Automatic Return To Your Local Machine

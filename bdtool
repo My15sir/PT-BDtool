@@ -417,6 +417,83 @@ collect_results() {
     printf "%s" "$in"
   }
 
+  collect_scan_roots() {
+    local full_mode="$1"
+    local target_root="$2"
+    local raw="${BDTOOL_SCAN_INCLUDE_ROOTS:-}"
+    local item=""
+    local -a roots=()
+
+    if [[ -n "$raw" ]]; then
+      raw="${raw//,/ }"
+      for item in $raw; do
+        item="$(normalize_scan_root "$item")"
+        [[ -d "$item" ]] || continue
+        roots+=("$item")
+      done
+    elif [[ "$full_mode" == "1" ]]; then
+      if [[ "$target_root" != "/" ]]; then
+        roots+=("$target_root")
+      elif [[ -n "${SSH_CONNECTION:-}" ]]; then
+        for item in /home /root /data /mnt /media /srv; do
+          [[ -d "$item" ]] && roots+=("$item")
+        done
+      else
+        roots+=("/")
+      fi
+    else
+      roots+=("$target_root")
+    fi
+
+    if [[ "${#roots[@]}" -eq 0 ]]; then
+      roots+=("$target_root")
+    fi
+
+    printf '%s\n' "${roots[@]}"
+  }
+
+  scan_should_prune_dir() {
+    local path="$1"
+    local base=""
+    local extra_raw="${BDTOOL_SCAN_EXCLUDE_ROOTS:-}"
+    local item=""
+
+    base="$(basename "$path")"
+    case "$base" in
+      proc|sys|dev|run|tmp|var|node_modules|.git|.svn|.cache|.npm|.pnpm-store)
+        return 0
+        ;;
+    esac
+
+    case "$path" in
+      /proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/tmp|/tmp/*|/var/tmp|/var/tmp/*|/var/cache|/var/cache/*|/var/lib/docker|/var/lib/docker/*|/var/lib/containerd|/var/lib/containerd/*|/snap|/snap/*|/nix|/nix/*)
+        return 0
+        ;;
+    esac
+
+    if [[ -n "$extra_raw" ]]; then
+      extra_raw="${extra_raw//,/ }"
+      for item in $extra_raw; do
+        item="$(normalize_scan_root "$item")"
+        [[ -n "$item" ]] || continue
+        case "$path" in
+          "$item"|"$item"/*) return 0 ;;
+        esac
+      done
+    fi
+
+    return 1
+  }
+
+  emit_scan_candidates() {
+    local scan_root="$1"
+    find "$scan_root" \( -type d \( \
+      -name proc -o -name sys -o -name dev -o -name run -o -name tmp -o \
+      -name node_modules -o -name .git -o -name .svn -o -name .cache -o -name .npm -o -name .pnpm-store \
+    \) -prune \) -o \
+    \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null
+  }
+
   SCAN_TYPES=()
   SCAN_ITEMS=()
   unset SCAN_SEEN
@@ -424,12 +501,22 @@ collect_results() {
 
   if [[ "$full" == "1" ]]; then
     root="$(normalize_scan_root "${BDTOOL_SCAN_FULL_ROOT:-/}")"
+    local -a scan_roots=()
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && scan_roots+=("$p")
+    done < <(collect_scan_roots "1" "$root")
     screen "扫描中：全盘扫描（$root）"
+    if [[ -n "${BDTOOL_SCAN_INCLUDE_ROOTS:-}" ]]; then
+      screen "扫描白名单：${BDTOOL_SCAN_INCLUDE_ROOTS}"
+    elif [[ "$root" == "/" && -n "${SSH_CONNECTION:-}" ]]; then
+      screen "扫描白名单：/home /root /data /mnt /media /srv"
+    fi
     screen "扫描进度: 0%"
     tmp_candidates="$(mktemp)"
-    find "$root" \
-      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+    : > "$tmp_candidates"
+    for p in "${scan_roots[@]}"; do
+      emit_scan_candidates "$p" >> "$tmp_candidates" || true
+    done
     total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
     processed=0
     last_pct=0
@@ -443,6 +530,9 @@ collect_results() {
           screen "扫描进度: ${pct}%"
           last_pct="$pct"
         fi
+      fi
+      if scan_should_prune_dir "$p"; then
+        continue
       fi
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
         type="BDMV"
@@ -477,9 +567,7 @@ collect_results() {
     screen "扫描中：目录扫描（$root）"
     screen "扫描进度: 0%"
     tmp_candidates="$(mktemp)"
-    find "$root" \
-      \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+    emit_scan_candidates "$root" > "$tmp_candidates" || true
     total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
     processed=0
     last_pct=0
@@ -493,6 +581,9 @@ collect_results() {
           screen "扫描进度: ${pct}%"
           last_pct="$pct"
         fi
+      fi
+      if scan_should_prune_dir "$p"; then
+        continue
       fi
       if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
         type="BDMV"

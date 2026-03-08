@@ -167,6 +167,40 @@ pt
 - 出问题时更容易定位
 - 对新手最友好
 
+### VPS 扫描建议
+
+现在开始，`pt` 在 **SSH / VPS 环境下执行“全盘扫描”** 时，会默认优先只扫描这些目录：
+
+```bash
+/home /root /data /mnt /media /srv
+```
+
+这样做是为了尽量避开这些常见噪音来源：
+- `node_modules`
+- `.git`
+- `.cache`
+- `/var/lib/docker`
+- `/proc` `/sys` `/dev` `/run`
+
+如果你想自己指定“只扫哪些目录”，可以这样写：
+
+```bash
+export BDTOOL_SCAN_INCLUDE_ROOTS="/home/admin/Downloads /data/media"
+pt
+```
+
+如果你还想额外排除一些目录，可以这样写：
+
+```bash
+export BDTOOL_SCAN_EXCLUDE_ROOTS="/home/admin/.cache /home/admin/test"
+pt
+```
+
+说明：
+- `BDTOOL_SCAN_INCLUDE_ROOTS`：白名单，多个目录用空格或逗号分隔
+- `BDTOOL_SCAN_EXCLUDE_ROOTS`：额外排除目录，多个目录用空格或逗号分隔
+- 如果你已经明确知道媒体都在 `~/Downloads`，强烈建议直接用白名单，速度和结果都会更干净
+
 ---
 
 ## 如果你想“处理完自动回传到本地”
