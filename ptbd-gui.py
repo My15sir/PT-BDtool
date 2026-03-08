@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, TOP, W, X, filedialog, messagebox, ttk
+from tkinter import BOTH, END, LEFT, W, X, filedialog, messagebox, ttk
 import tkinter as tk
 from tkinter.scrolledtext import ScrolledText
 
@@ -128,7 +128,9 @@ class App:
         self.reader_threads: list[threading.Thread] = []
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.status_var = tk.StringVar(value="就绪：先填配置，保存后点击“一步到位启动”")
+        self.selected_path_var = tk.StringVar(value="")
         self.config_vars = {}
+        self.scan_items: list[dict] = []
         self._build_ui()
         self._load_into_form(load_config())
         self._poll_logs()
@@ -184,11 +186,26 @@ class App:
         actions.pack(fill=X, pady=(0, 8))
         ttk.Button(actions, text="保存配置", command=self.save_form).pack(side=LEFT)
         ttk.Button(actions, text="打开配置目录", command=self.open_config_dir).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="扫描 VPS 候选", command=self.scan_remote).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="一步到位启动", command=self.start_remote).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="停止当前任务", command=self.stop_remote).pack(side=LEFT, padx=(8, 0))
 
         status = ttk.Label(container, textvariable=self.status_var)
         status.pack(anchor=W, pady=(4, 8))
+
+        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", padding=8)
+        scan_panel.pack(fill=BOTH, expand=False, pady=(0, 10))
+        columns = ("index", "type", "path")
+        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=8)
+        self.scan_tree.heading("index", text="#")
+        self.scan_tree.heading("type", text="类型")
+        self.scan_tree.heading("path", text="路径")
+        self.scan_tree.column("index", width=56, anchor="center")
+        self.scan_tree.column("type", width=90, anchor="center")
+        self.scan_tree.column("path", width=720, anchor="w")
+        self.scan_tree.pack(fill=BOTH, expand=True)
+        self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
+        ttk.Label(scan_panel, textvariable=self.selected_path_var).pack(anchor=W, pady=(6, 0))
 
         self.log_view = ScrolledText(container, wrap="word", font=("Consolas", 10))
         self.log_view.pack(fill=BOTH, expand=True)
@@ -318,6 +335,89 @@ class App:
         )
         self._start_reader(self.process)
 
+    def build_ssh_prefix(self, data: dict) -> list[str]:
+        password = data["remote_password"]
+        if password:
+            sshpass_bin = shutil.which("sshpass")
+            if not sshpass_bin:
+                raise RuntimeError("当前使用密码模式，但本机缺少 sshpass。")
+            return [sshpass_bin, "-p", password]
+        return []
+
+    def build_scan_command(self, data: dict) -> list[str]:
+        ssh_bin = shutil.which("ssh")
+        if not ssh_bin:
+            raise RuntimeError("本机缺少 ssh。")
+        remote_script = [
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS={sh_quote(data['scan_include'])};",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={sh_quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
+            "exec bdtool scan-json --full --lang zh",
+        ]
+        return (
+            self.build_ssh_prefix(data)
+            + [
+                ssh_bin,
+                "-p",
+                data["remote_port"],
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                data["remote_host"],
+                "bash",
+                "-lc",
+                " ".join([part for part in remote_script if part]),
+            ]
+        )
+
+    def scan_remote(self) -> None:
+        if not self.save_form():
+            return
+        data = self.form_data()
+        self.status_var.set("扫描中：正在从 VPS 获取候选列表")
+        self.append_log("[gui] 开始通过 scan-json 获取 VPS 候选列表")
+
+        def worker() -> None:
+            try:
+                cmd = self.build_scan_command(data)
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(APP_ROOT),
+                    text=True,
+                    capture_output=True,
+                    timeout=1800,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"ssh rc={result.returncode}")
+                payload = json.loads(result.stdout)
+                self.scan_items = payload.get("items", [])
+                self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
+                self.root.after(0, self.refresh_scan_items)
+            except Exception as exc:
+                self.log_queue.put(f"[gui] 获取候选失败：{exc}")
+                self.root.after(0, lambda: self.status_var.set("获取候选失败，请看日志"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def refresh_scan_items(self) -> None:
+        for item in self.scan_tree.get_children():
+            self.scan_tree.delete(item)
+        for item in self.scan_items:
+            self.scan_tree.insert("", END, values=(item["index"], item.get("type_label", item["type"]), item["path"]))
+        self.status_var.set(f"扫描完成：共 {len(self.scan_items)} 个候选")
+        if self.scan_items:
+            first = self.scan_tree.get_children()[0]
+            self.scan_tree.selection_set(first)
+            self.scan_tree.focus(first)
+
+    def on_scan_select(self, _event=None) -> None:
+        selection = self.scan_tree.selection()
+        if not selection:
+            self.selected_path_var.set("")
+            return
+        values = self.scan_tree.item(selection[0], "values")
+        if values:
+            self.selected_path_var.set(f"当前选中：{values[2]}")
+
     def _start_reader(self, proc: subprocess.Popen[str]) -> None:
         def read_stream() -> None:
             assert proc.stdout is not None
@@ -391,3 +491,7 @@ def cli_main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(cli_main())
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"

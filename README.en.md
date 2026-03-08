@@ -109,6 +109,7 @@ ptbd-gui
 
 This is the current cross-platform GUI MVP. It helps you:
 - fill in the VPS address, password, and local save dir
+- fetch the VPS candidate list directly into the GUI
 - save the config
 - click one button to start the current remote flow
 
