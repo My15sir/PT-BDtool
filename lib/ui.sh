@@ -618,14 +618,15 @@ bdinfo_raw_report_valid() {
   bdinfo_match_line "$report_file" '^[[:space:]]*PLAYLIST REPORT:[[:space:]]*$' || return 1
   bdinfo_match_line "$report_file" '^[[:space:]]*VIDEO:[[:space:]]*$' || return 1
   bdinfo_match_line "$report_file" '^[[:space:]]*AUDIO:[[:space:]]*$' || return 1
-  bdinfo_match_line "$report_file" '^[[:space:]]*SUBTITLES:[[:space:]]*$' || return 1
   bdinfo_match_line "$report_file" '^[[:space:]]*FILES:[[:space:]]*$' || return 1
   bdinfo_section_has_content "$report_file" "DISC INFO:" "text" || return 1
   bdinfo_section_has_content "$report_file" "PLAYLIST REPORT:" "text" || return 1
   bdinfo_section_has_content "$report_file" "VIDEO:" "stream" || return 1
   bdinfo_section_has_content "$report_file" "AUDIO:" "stream" || return 1
-  bdinfo_section_has_content "$report_file" "SUBTITLES:" "text" || return 1
   bdinfo_section_has_content "$report_file" "FILES:" "files" || return 1
+  if bdinfo_match_line "$report_file" '^[[:space:]]*SUBTITLES:[[:space:]]*$'; then
+    bdinfo_section_has_content "$report_file" "SUBTITLES:" "text" || return 1
+  fi
 }
 
 write_full_bdinfo_report() {
