@@ -298,6 +298,7 @@ finalize_video_output() {
 
 is_video() {
   case "${1,,}" in
+    *.d.ts) return 1 ;;
     *.mkv|*.mp4|*.avi|*.mov|*.ts|*.m2ts|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
     *) return 1 ;;
   esac
@@ -420,7 +421,7 @@ collect_results() {
     tmp_candidates="$(mktemp)"
     find "$root" \
       \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
     total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
     processed=0
     last_pct=0
@@ -470,7 +471,7 @@ collect_results() {
     tmp_candidates="$(mktemp)"
     find "$root" \
       \( -path "$root/proc" -o -path "$root/proc/*" -o -path "$root/sys" -o -path "$root/sys/*" -o -path "$root/dev" -o -path "$root/dev/*" -o -path "$root/run" -o -path "$root/run/*" -o -path "$root/tmp" -o -path "$root/tmp/*" \) -prune -o \
-      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
+      \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null > "$tmp_candidates" || true
     total="$(wc -l < "$tmp_candidates" | tr -d ' ')"
     processed=0
     last_pct=0

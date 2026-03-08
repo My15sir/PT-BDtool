@@ -171,7 +171,7 @@ bt_find_video_files() {
     -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.m2ts" -o -iname "*.ts" -o \
     -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.webm" -o \
     -iname "*.mpg" -o -iname "*.mpeg" \
-  \) 2>/dev/null | sort -u | while IFS= read -r path; do
+  \) ! -iname "*.d.ts" 2>/dev/null | sort -u | while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     if bt_bdmv_root_from_stream_file "$path" >/dev/null 2>&1; then
       continue
@@ -203,6 +203,7 @@ bt_is_video_file() {
   local l
   l="$(echo "$p" | tr '[:upper:]' '[:lower:]')"
   case "$l" in
+    *.d.ts) return 1 ;;
     *.mkv|*.mp4|*.m2ts|*.ts|*.avi|*.mov|*.wmv|*.webm|*.mpg|*.mpeg) return 0 ;;
     *) return 1 ;;
   esac
