@@ -1068,7 +1068,7 @@ main() {
   # and compatibility commands execute real processing.
   if [[ $# -gt 0 ]]; then
     case "$1" in
-      scan|doctor|status|install|clean|start|version|--version|-v|help)
+      scan|doctor|status|install|clean|start|version|--version|-v|help|--help|-h)
         if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
           exec "$ROOT_DIR/bdtool.sh" "$@"
         fi

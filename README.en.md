@@ -1,66 +1,97 @@
 # PT-BDtool
 
-PT-BDtool is a media info packaging tool.
+PT-BDtool is a media info packaging tool.  
+It turns videos, audio files, Blu-ray `BDMV` folders, and Blu-ray `ISO` images into a cleaner result package that is easier to organize, share, or archive.
 
-It can process:
-- video files
-- audio files
-- Blu-ray `BDMV` folders
-- Blu-ray `ISO` images
-
-After processing, it generates a ready-to-use info package, for example:
+Typical output looks like this:
 - Video: `mediainfo.txt` + `1.png` to `6.png`
 - Audio: `mediainfo.txt` + `频谱图.png`
-- Disc/ISO: `BDInfo.txt` + `1.png` to `6.png`
+- Disc / ISO: `BDInfo.txt` + `1.png` to `6.png`
 
-If you only want the quickest way to use it, start with **3-minute quick start** below.
+If this is your first time using the project, follow the **quickest beginner path** below first.
 
-## 3-Minute Quick Start
+## Quickest Beginner Path
 
-### Step 1: Install
-Run this inside the project directory:
+### 1) Know which environment you are in
+
+Most users fall into one of these two cases:
+
+- **Local machine**: run on your own computer and keep the result there
+- **VPS / remote Linux**: run on a server, then download the result later
+
+If you are not sure, just start with the local-machine workflow.
+
+### 2) Install
+
+Run this from the project root:
 
 ```bash
 bash install.sh --offline
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Check that installation worked:
+Then verify the command is available:
 
 ```bash
 pt --help
+bdtool status
 ```
 
-### Step 2: Start
-The simplest way:
+If both commands print useful output, the install is basically OK.
+
+### 3) Make PATH persistent
+
+A common beginner problem is: it works once, then fails in a new terminal.  
+That usually means `~/.local/bin` is not permanently added to `PATH`.
+
+For `bash`:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+For `zsh`, replace `~/.bashrc` with `~/.zshrc`.
+
+### 4) Start
+
+The simplest start command is:
 
 ```bash
 pt
 ```
 
-### Step 3: Follow the menu
-Inside the menu:
+Notes:
+- `pt` / `bdtool`: open menu mode by default
+- `pt --help` / `bdtool --help`: show CLI help
 
-1. Type `1` to start scanning
-2. Wait for scan to finish
-3. Enter the item number you want to process
-4. Wait for generation and packaging
-5. Go to the shown output path and get your package
+### 5) Follow the menu
 
-## The 3 Most Common Ways To Use It
+Inside the menu, the normal path is:
 
-### Option 1: Use it on your local machine
-If you run it on your own computer:
+1. type `1` to start scanning
+2. choose full scan or directory scan
+3. wait for the scan to finish
+4. enter the item number you want
+5. wait for generation and packaging
+6. open the shown result directory
+
+---
+
+## The 3 Most Practical Workflows
+
+### Option 1: Run on your local machine
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 pt
 ```
 
-The result is saved to your desktop by default.
+The result is stored on the current machine.
 
-### Option 2: Use it on a VPS and keep the result on the VPS
-This is the simplest and most reliable VPS workflow:
+### Option 2: Run on a VPS and keep the result on the VPS first
+
+This is the simplest and safest VPS workflow:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -68,7 +99,7 @@ export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
 pt
 ```
 
-After processing, the package will be stored in:
+After processing, the result is usually here:
 
 ```bash
 $HOME/PT-BDtool-downloads
@@ -80,10 +111,9 @@ Then download it from your local machine:
 scp user@your-vps-ip:$HOME/PT-BDtool-downloads/*.zip .
 ```
 
-If zip is not available, the file may be `tar.gz` instead.
+If `zip` is not available, the package may be `tar.gz`.
 
 ### Option 3: Skip the menu and process one file directly
-If you already know the file path, direct CLI is easier:
 
 ```bash
 bdtool /path/to/movie.mp4 --out /path/to/output
@@ -95,9 +125,31 @@ Example:
 bdtool ~/Videos/test.mp4 --out ~/PT-output
 ```
 
+---
+
+## Actual Runtime Model
+
+This is how the project really works now:
+
+- `install.sh`: installs the app and bundled offline dependencies
+- `pt` / `bdtool`: open menu mode by default
+- `bdtool <file-or-dir>`: run direct CLI processing
+- `bdtool doctor`: check runtime dependencies
+- `bdtool status`: check installation state
+- `bdtool clean`: remove the default output directory
+
+For most beginners, only these two commands matter:
+
+```bash
+bash install.sh --offline
+pt
+```
+
+---
+
 ## Best Practice For VPS Users
 
-If you are on a VPS, this is the recommended starting point:
+If you are on a VPS, start with this and do not configure auto-return yet:
 
 ```bash
 bash install.sh --offline
@@ -107,23 +159,24 @@ pt
 ```
 
 Why this is recommended:
-- no desktop environment required
-- no auto-return setup required
-- fewer moving parts
+- no desktop requirement
+- no upload/return setup required
 - easier troubleshooting
+- lower chance of user error
+
+---
 
 ## If You Want Automatic Return To Your Local Machine
 
-This is an advanced feature, but it is now officially supported.
+This is an advanced feature. It works, but only set it up after the basic flow works.
 
-Use `BDTOOL_RETURN_MODE` to choose the mode:
+Use `BDTOOL_RETURN_MODE`:
 
-- `local`: save on the current machine
-- `http`: upload automatically to your HTTP receiver
-- `scp`: send back automatically with `scp`
+- `local`: keep result on the current machine
+- `http`: upload to an HTTP receiver
+- `scp`: send back with `scp`
 
 ### Option A: HTTP auto-return
-Best if you already have a receiver or use a reverse tunnel.
 
 ```bash
 export BDTOOL_RETURN_MODE=http
@@ -131,14 +184,11 @@ export BDTOOL_RETURN_HTTP_URL='http://127.0.0.1:18080/upload'
 pt
 ```
 
-Legacy variable still supported:
-
-```bash
-BDTOOL_CLIENT_UPLOAD_URL
-```
+Legacy variable `BDTOOL_CLIENT_UPLOAD_URL` is still supported.
 
 ### Option B: SCP auto-return
-SSH key authentication is recommended.
+
+SSH key authentication is strongly recommended.
 
 ```bash
 export BDTOOL_RETURN_MODE=scp
@@ -150,74 +200,148 @@ export BDTOOL_RETURN_SCP_IDENTITY_FILE="$HOME/.ssh/id_ed25519"
 pt
 ```
 
-Optional:
-- `BDTOOL_RETURN_SCP_PASSWORD`: only if password auth is unavoidable; the tool will try `sshpass -e`
+Optional variables:
+- `BDTOOL_RETURN_SCP_PASSWORD`: only if password auth is unavoidable
 - `BDTOOL_RETURN_SCP_STRICT_HOST_KEY_CHECKING`: default is `accept-new`
 
 Notes:
-- If the VPS cannot reach your local machine directly, create a reverse tunnel first
-- If you are not sure how to configure this, use the “save on VPS first” workflow above
+- If the VPS cannot reach your local machine, set up port forwarding or a reverse tunnel first
+- If you are unsure, use the “save on VPS first” workflow
+
+---
 
 ## Useful Commands
 
 ### Show help
+
 ```bash
 bdtool --help
 ```
 
 ### Check dependencies
+
 ```bash
 bdtool doctor
 ```
 
 ### Check install status
+
 ```bash
 bdtool status
 ```
 
-### Clean output directory
+### Start the menu
+
+```bash
+pt
+```
+
+### Clean the default output directory
+
 ```bash
 bdtool clean
 ```
 
+---
+
 ## Direct CLI Examples
 
 ### Process one video
+
 ```bash
 bdtool /data/movie.mkv --out /data/output
 ```
 
 ### Process one audio file
+
 ```bash
 bdtool /data/song.flac --out /data/output
 ```
 
 ### Process a whole directory
+
 ```bash
 bdtool /data/media-dir --out /data/output
 ```
 
 ### Dry run only
+
 ```bash
 bdtool /data/movie.mkv --mode dry --out /data/output
 ```
 
 ### Enable debug logs
+
 ```bash
 bdtool /data/movie.mkv --log-level debug --out /data/output
 ```
 
-## What The Menu Does
+---
 
-When you run `pt`, it generally does this:
+## Common Problems
 
-1. scan media files
-2. list candidates
-3. let you choose an item
-4. generate info files and screenshots
-5. package the result
-6. save locally or return automatically
-7. clean temporary generated files by default
+### 1) `pt: command not found`
+
+Usually `~/.local/bin` is not in `PATH`.
+
+Try:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+pt --help
+```
+
+If that fixes it, add the PATH line to `~/.bashrc` or `~/.zshrc`.
+
+### 2) Missing `ffmpeg`, `mediainfo`, or `BDInfo`
+
+Do not guess first. Check with:
+
+```bash
+bdtool doctor
+```
+
+If dependencies are incomplete, go back to the project root and run:
+
+```bash
+bash install.sh --offline
+```
+
+### 3) The menu opens but finds no files
+
+Make sure you entered a directory, not an executable script path.  
+Main supported inputs:
+
+- video: `mkv`, `mp4`, `m2ts`, `ts`, `avi`, `mov`
+- audio: `mp3`, `flac`, `wav`, `m4a`, `aac`
+- Blu-ray: `BDMV` folders and `iso` files
+
+### 4) On a VPS, you do not know where the package went
+
+Set an explicit download directory:
+
+```bash
+export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
+pt
+```
+
+Then everything is collected under `$HOME/PT-BDtool-downloads`.
+
+---
+
+## Already Verified
+
+The current repository already has scripted verification for:
+
+- `bdtool --help`
+- `bdtool doctor`
+- `bdtool status`
+- direct CLI processing of a sample video
+- menu scan + generate flow
+- VPS-like local-save / SCP return flows
+
+If you just want to get started, follow the install and launch steps above.
 
 ## What You Usually Get
 

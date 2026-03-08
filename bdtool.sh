@@ -757,9 +757,9 @@ bt_usage() {
 bdtool <path> [options]
 bdtool scan <path> --out <dir> [options]  # 兼容入口
 bdtool doctor
-bdtool status  Check installation status
+bdtool status
 bdtool version
-bdtool start   Start interactive workflow
+bdtool start
 bdtool install
 bdtool clean
 
@@ -784,6 +784,10 @@ examples:
   ./bdtool.sh --version
   ./bdtool.sh install
   ./bdtool.sh clean
+
+tips:
+  直接执行 `bdtool` 或 `pt` 会进入菜单模式
+  执行 `bdtool --help` / `pt --help` 会显示这份 CLI 帮助
 USAGE
 }
 
