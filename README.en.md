@@ -84,6 +84,12 @@ After setup, you can simply run:
 ptbd-remote
 ```
 
+If you prefer a more double-click-friendly entry, you can also use:
+
+```bash
+ptbd-remote-start
+```
+
 It automatically:
 - starts a temporary local receive server
 - creates the return tunnel to the VPS
@@ -243,6 +249,12 @@ In this mode, the user only needs to:
 
 1. run `ptbd-remote` on the local machine
 2. choose the target item in the remote menu
+
+Desktop users can also run:
+
+```bash
+ptbd-remote-start
+```
 
 Everything after that runs automatically:
 - generate artifacts

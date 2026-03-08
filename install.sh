@@ -51,12 +51,12 @@ preflight_install_context() {
     "$SCRIPT_DIR/bdtool.sh"
     "$SCRIPT_DIR/ptbd-start.sh"
     "$SCRIPT_DIR/ptbd-remote.sh"
+    "$SCRIPT_DIR/ptbd-remote-start.sh"
     "$SCRIPT_DIR/lib/ui.sh"
     "$SCRIPT_DIR/lib/i18n.sh"
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
     "$SCRIPT_DIR/scripts/build-bundle.sh"
     "$SCRIPT_DIR/scripts/remote-upload-server.py"
-    "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/third_party/bundle/linux-amd64/bin"
   )
 
@@ -165,6 +165,7 @@ install_entrypoints() {
   local pt_link="$bin_dir/pt"
   local pts_link="$bin_dir/pts"
   local remote_link="$bin_dir/ptbd-remote"
+  local remote_start_link="$bin_dir/ptbd-remote-start"
 
   mkdir -p "$bin_dir"
   # Force-replace stale copied wrappers (regular files) from old versions.
@@ -173,12 +174,14 @@ install_entrypoints() {
   [[ -e "$pt_link" && ! -L "$pt_link" ]] && rm -f "$pt_link"
   [[ -e "$pts_link" && ! -L "$pts_link" ]] && rm -f "$pts_link"
   [[ -e "$remote_link" && ! -L "$remote_link" ]] && rm -f "$remote_link"
+  [[ -e "$remote_start_link" && ! -L "$remote_start_link" ]] && rm -f "$remote_start_link"
 
   ln -sfn "$install_root/bdtool" "$bdtool_link"
   ln -sfn "$install_root/ptbd-start.sh" "$start_link"
   ln -sfn "$install_root/bdtool" "$pt_link"
   ln -sfn "$install_root/ptbd-start.sh" "$pts_link"
   ln -sfn "$install_root/ptbd-remote.sh" "$remote_link"
+  ln -sfn "$install_root/ptbd-remote-start.sh" "$remote_start_link"
 }
 
 install_runtime_wrappers() {
@@ -211,6 +214,7 @@ post_install_self_check() {
     "$install_root/bdtool.sh"
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
+    "$install_root/ptbd-remote-start.sh"
     "$install_root/lib/ui.sh"
     "$install_root/lib/i18n.sh"
     "$install_root/scripts/remote-upload-server.py"
@@ -260,6 +264,12 @@ post_install_self_check() {
     err "self-check missing entrypoint: $bin_dir/ptbd-remote"
     fail=1
   fi
+  if [[ -x "$bin_dir/ptbd-remote-start" ]]; then
+    log "self-check ok: entrypoint $bin_dir/ptbd-remote-start"
+  else
+    err "self-check missing entrypoint: $bin_dir/ptbd-remote-start"
+    fail=1
+  fi
   if [[ -x "$bin_dir/BDInfo" ]]; then
     log "self-check ok: runtime wrapper $bin_dir/BDInfo"
   else
@@ -293,6 +303,10 @@ post_install_self_check() {
   fi
   if ! "$bin_dir/ptbd-remote" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-remote --help"
+    fail=1
+  fi
+  if ! "$bin_dir/ptbd-remote-start" --help >/dev/null 2>&1; then
+    err "self-check failed: $bin_dir/ptbd-remote-start --help"
     fail=1
   fi
   if ! command -v BDInfo >/dev/null 2>&1; then
@@ -331,6 +345,13 @@ post_install_self_check() {
     err "copy-paste fix: rm -f \"$resolved_remote\" && hash -r && \"$bin_dir/ptbd-remote\" --help"
     fail=1
   fi
+  local resolved_remote_start=""
+  resolved_remote_start="$(command -v ptbd-remote-start 2>/dev/null || true)"
+  if [[ -n "$resolved_remote_start" && "$resolved_remote_start" != "$bin_dir/ptbd-remote-start" ]]; then
+    err "PATH entry mismatch: command -v ptbd-remote-start -> $resolved_remote_start (expected $bin_dir/ptbd-remote-start)"
+    err "copy-paste fix: rm -f \"$resolved_remote_start\" && hash -r && \"$bin_dir/ptbd-remote-start\" --help"
+    fail=1
+  fi
 
   if [[ "$fail" -ne 0 ]]; then
     err "post-install self-check failed."
@@ -347,11 +368,13 @@ EOF
       echo "[DIAG] command -v pt: $(command -v pt 2>/dev/null || echo missing)"
       echo "[DIAG] command -v pts: $(command -v pts 2>/dev/null || echo missing)"
       echo "[DIAG] command -v ptbd-remote: $(command -v ptbd-remote 2>/dev/null || echo missing)"
+      echo "[DIAG] command -v ptbd-remote-start: $(command -v ptbd-remote-start 2>/dev/null || echo missing)"
       [[ -e "$bin_dir/bdtool" ]] && ls -l "$bin_dir/bdtool" || echo "[DIAG] missing: $bin_dir/bdtool"
       [[ -e "$bin_dir/ptbd-start" ]] && ls -l "$bin_dir/ptbd-start" || echo "[DIAG] missing: $bin_dir/ptbd-start"
       [[ -e "$bin_dir/pt" ]] && ls -l "$bin_dir/pt" || echo "[DIAG] missing: $bin_dir/pt"
       [[ -e "$bin_dir/pts" ]] && ls -l "$bin_dir/pts" || echo "[DIAG] missing: $bin_dir/pts"
       [[ -e "$bin_dir/ptbd-remote" ]] && ls -l "$bin_dir/ptbd-remote" || echo "[DIAG] missing: $bin_dir/ptbd-remote"
+      [[ -e "$bin_dir/ptbd-remote-start" ]] && ls -l "$bin_dir/ptbd-remote-start" || echo "[DIAG] missing: $bin_dir/ptbd-remote-start"
     } >&2
     exit 1
   fi
@@ -440,6 +463,7 @@ copy_if_changed "$SCRIPT_DIR/bdtool" "$INSTALL_ROOT/bdtool" "bdtool"
 copy_if_changed "$SCRIPT_DIR/bdtool.sh" "$INSTALL_ROOT/bdtool.sh" "bdtool.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
+copy_if_changed "$SCRIPT_DIR/ptbd-remote-start.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "ptbd-remote-start.sh"
 copy_if_changed "$SCRIPT_DIR/install.sh" "$INSTALL_ROOT/install.sh" "install.sh"
 if [[ -f "$SCRIPT_DIR/README.md" ]]; then
   copy_if_changed "$SCRIPT_DIR/README.md" "$INSTALL_ROOT/README.md" "README.md"
@@ -452,7 +476,7 @@ copy_if_changed "$SCRIPT_DIR/lib/i18n.sh" "$INSTALL_ROOT/lib/i18n.sh" "lib/i18n.
 mkdir -p "$INSTALL_ROOT/scripts"
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py"
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py"
 log "install stage done (elapsed=$(elapsed_since "$INSTALL_TS"), copied=$COPIED_COUNT, skipped=$SKIPPED_COUNT)"
 
 if [[ -w "/usr/local/bin" || ${EUID:-$(id -u)} -eq 0 ]]; then

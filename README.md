@@ -84,6 +84,12 @@ ptbd-remote --setup
 ptbd-remote
 ```
 
+如果你更希望用一个更适合双击的入口，也可以用：
+
+```bash
+ptbd-remote-start
+```
+
 它会自动做几件事：
 - 在你本机临时启动接收服务
 - 自动建立到 VPS 的回传通道
@@ -246,6 +252,12 @@ ptbd-remote
 
 1. 在本机运行 `ptbd-remote`
 2. 在远端菜单里选要处理的条目
+
+如果你是图形桌面用户，也可以直接运行：
+
+```bash
+ptbd-remote-start
+```
 
 后面的动作会自动完成：
 - 自动生成

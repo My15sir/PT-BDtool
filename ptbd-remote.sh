@@ -20,6 +20,7 @@ UPLOAD_SERVER_SCRIPT="${SCRIPT_DIR}/scripts/remote-upload-server.py"
 
 UPLOAD_SERVER_PID=""
 TUNNEL_PID=""
+SETUP_MODE=0
 
 log() { printf '[ptbd-remote] %s\n' "$*"; }
 err() { printf '[ptbd-remote][ERROR] %s\n' "$*" >&2; }
@@ -48,6 +49,7 @@ Options:
   --scan-exclude "DIRS"     Remote extra exclude roots, separated by spaces or commas
   --config FILE             Config file path
   --setup                   Interactive first-run setup
+  --show-config             Show the effective config and exit
   --keep-bridge             Keep local server and tunnel after command exits
   -h, --help                Show this help
 
@@ -149,6 +151,26 @@ run_setup() {
   echo "下次直接运行：ptbd-remote"
 }
 
+show_config() {
+  local masked_password="(empty)"
+  [[ -n "$PTBD_REMOTE_PASSWORD" ]] && masked_password="******"
+  local save_dir=""
+  save_dir="$(resolve_save_dir)"
+  cat <<EOF
+Current config
+  config file:      $PTBD_REMOTE_CONFIG_FILE
+  remote host:      ${PTBD_REMOTE_HOST:-<unset>}
+  remote port:      ${PTBD_REMOTE_PORT:-22}
+  auth mode:        $( [[ -n "$PTBD_REMOTE_PASSWORD" ]] && echo password || echo key )
+  remote command:   ${PTBD_REMOTE_PT_CMD:-pt}
+  local save dir:   ${save_dir}
+  scan include:     ${PTBD_SCAN_INCLUDE_ROOTS:-<unset>}
+  scan exclude:     ${PTBD_SCAN_EXCLUDE_ROOTS:-<unset>}
+  auto cleanup:     ${PTBD_AUTO_CLEANUP:-1}
+  password:         ${masked_password}
+EOF
+}
+
 cleanup() {
   local rc=$?
   if [[ "$PTBD_KEEP_BRIDGE" != "1" ]]; then
@@ -159,7 +181,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-SETUP_MODE=0
 load_config_file "$PTBD_REMOTE_CONFIG_FILE"
 
 while [[ $# -gt 0 ]]; do
@@ -175,6 +196,7 @@ while [[ $# -gt 0 ]]; do
     --scan-exclude) PTBD_SCAN_EXCLUDE_ROOTS="${2:-}"; shift 2 ;;
     --config) PTBD_REMOTE_CONFIG_FILE="${2:-}"; shift 2; load_config_file "$PTBD_REMOTE_CONFIG_FILE" ;;
     --setup) SETUP_MODE=1; shift ;;
+    --show-config) show_config; exit 0 ;;
     --keep-bridge) PTBD_KEEP_BRIDGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "unknown argument: $1"; usage; exit 2 ;;
@@ -192,6 +214,7 @@ command -v ssh >/dev/null 2>&1 || { err "missing ssh"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
 
 LOCAL_SAVE_DIR="$(resolve_save_dir)"
+show_config
 log "local receive dir: $LOCAL_SAVE_DIR"
 
 PTBD_SAVE_DIR="$LOCAL_SAVE_DIR" nohup python3 "$UPLOAD_SERVER_SCRIPT" "$PTBD_LOCAL_HTTP_PORT" >/tmp/ptbd_remote_upload_server.log 2>&1 &
