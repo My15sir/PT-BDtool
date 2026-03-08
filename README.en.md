@@ -68,10 +68,23 @@ Notes:
 If your workflow is “**control a VPS from your local machine and return the result to your local desktop automatically**”, use:
 
 ```bash
-ptbd-remote --host root@your-vps-ip
+ptbd-remote --setup
 ```
 
-This command automatically:
+On first run, `--setup` asks for:
+- VPS host
+- SSH port
+- password or key mode
+- default scan roots
+- local save directory
+
+After setup, you can simply run:
+
+```bash
+ptbd-remote
+```
+
+It automatically:
 - starts a temporary local receive server
 - creates the return tunnel to the VPS
 - opens the remote `pt` menu
@@ -217,13 +230,13 @@ Notes:
 If you want end users to install once, select an item, and let everything else happen automatically, use:
 
 ```bash
-ptbd-remote --host root@your-vps-ip --scan-include "/home/admin/Downloads"
+ptbd-remote --setup
 ```
 
-If SSH keys are not ready yet, password mode also works:
+Then for daily use:
 
 ```bash
-ptbd-remote --host root@your-vps-ip --password 'your-password' --scan-include "/home/admin/Downloads"
+ptbd-remote
 ```
 
 In this mode, the user only needs to:
@@ -246,7 +259,13 @@ Default local target:
 To save somewhere else:
 
 ```bash
-ptbd-remote --host root@your-vps-ip --save-dir /your/save/path
+ptbd-remote --setup
+```
+
+If you prefer a one-off command without setup, this still works:
+
+```bash
+ptbd-remote --host root@your-vps-ip --password 'your-password' --scan-include "/home/admin/Downloads" --save-dir /your/save/path
 ```
 
 ---

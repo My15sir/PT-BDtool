@@ -56,6 +56,7 @@ preflight_install_context() {
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
     "$SCRIPT_DIR/scripts/build-bundle.sh"
     "$SCRIPT_DIR/scripts/remote-upload-server.py"
+    "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/third_party/bundle/linux-amd64/bin"
   )
 

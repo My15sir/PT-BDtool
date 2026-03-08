@@ -68,10 +68,23 @@ pt
 如果你是“**本机控制 VPS，结果自动回到本机桌面**”这个场景，推荐直接用：
 
 ```bash
-ptbd-remote --host root@你的VPSIP
+ptbd-remote --setup
 ```
 
-这个命令会自动做几件事：
+第一次运行 `--setup` 后，按提示填好：
+- VPS 地址
+- SSH 端口
+- 密码或密钥模式
+- 默认扫描目录
+- 本机保存目录
+
+配置完成后，以后直接运行：
+
+```bash
+ptbd-remote
+```
+
+它会自动做几件事：
 - 在你本机临时启动接收服务
 - 自动建立到 VPS 的回传通道
 - 打开 VPS 上的 `pt` 菜单
@@ -220,13 +233,13 @@ pt
 如果你希望用户安装好后，只要“进入菜单选文件”，后面的步骤都自动完成，推荐用这个命令：
 
 ```bash
-ptbd-remote --host root@你的VPSIP --scan-include "/home/admin/Downloads"
+ptbd-remote --setup
 ```
 
-如果 VPS 还没配 SSH 密钥，也可以先临时用密码：
+配好后，平时直接运行：
 
 ```bash
-ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/home/admin/Downloads"
+ptbd-remote
 ```
 
 这个模式下，用户实际只需要做两件事：
@@ -249,7 +262,13 @@ ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/h
 如果你想换成本机其他目录：
 
 ```bash
-ptbd-remote --host root@你的VPSIP --save-dir /你的/保存目录
+ptbd-remote --setup
+```
+
+如果你不想进向导，也仍然可以直接一次性写参数：
+
+```bash
+ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/home/admin/Downloads" --save-dir /你的/保存目录
 ```
 
 ---
